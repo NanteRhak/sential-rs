@@ -16,7 +16,7 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
         Command::Ps { sort, json } => ps(config, sort, json),
         Command::Top { json } => top(config, json),
         Command::Tui => crate::tui::run(config),
-        Command::Watch => Err("watch is not implemented yet".into()),
+        Command::Watch { interval, duration } => watch(config, interval, duration),
         Command::Alerts { last } => alerts(config, last),
         Command::Inspect { pid } => inspect(config, pid),
         Command::Kill {
@@ -295,6 +295,42 @@ fn record_action(
     };
     if let Err(error) = crate::action::write_record(path, &record) {
         eprintln!("sentinel: {error}");
+    }
+}
+
+/// Watch the metrics as they change.
+fn watch(config: Config, interval: Option<String>, duration: Option<String>) -> Result<(), String> {
+    let interval = resolve_interval(interval, config.general.interval)?;
+    let limit = match duration {
+        Some(text) => Some(parse_duration(&text).map_err(|error| format!("--duration: {error}"))?),
+        None => None,
+    };
+    crate::interrupt::install();
+
+    println!(
+        "sampling every {} (press Ctrl-C to stop)",
+        describe_interval(interval)
+    );
+
+    let mut sampler = sampler(&config, interval);
+    let deadline = limit.map(|limit| std::time::Instant::now() + limit);
+    let stop = || {
+        crate::interrupt::requested()
+            || deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline)
+    };
+    sampler.run_with(&stop, &|state| {
+        println!("{}", view::watch_line(&state.system));
+    });
+    Ok(())
+}
+
+/// How an interval is shown to the user.
+fn describe_interval(interval: Duration) -> String {
+    let millis = interval.as_millis();
+    if millis < 1_000 {
+        format!("{millis}ms")
+    } else {
+        format!("{:.1}s", interval.as_secs_f64())
     }
 }
 

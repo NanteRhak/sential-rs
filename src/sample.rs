@@ -198,8 +198,14 @@ impl Sampler {
     /// measured from now, so a slow collector slows the sampler down instead of
     /// queueing work it can never catch up with.
     pub fn run(&mut self, stop: &dyn Fn() -> bool) {
+        self.run_with(stop, &|_| {});
+    }
+
+    /// Tick until `stop` returns true, reporting every tick.
+    pub fn run_with(&mut self, stop: &dyn Fn() -> bool, on_tick: &dyn Fn(&Arc<SamplerState>)) {
         while !stop() {
-            self.tick();
+            let state = self.tick();
+            on_tick(&state);
             let next = self.next_deadline();
             let now = Instant::now();
             if next > now {
@@ -325,6 +331,24 @@ mod tests {
         // At most one tick per interval would be 12 ticks; a sampler that piled
         // up would tick far more often than it could keep up.
         assert!(elapsed >= Duration::from_millis(100), "{elapsed:?}");
+    }
+
+    #[test]
+    fn the_sampler_honours_a_100ms_interval() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let collector = FakeCollector {
+            readings: vec![],
+            calls: calls.clone(),
+        };
+        let mut sampler = Sampler::new(Duration::from_millis(100), Box::new(collector));
+
+        let start = Instant::now();
+        let deadline = start + Duration::from_millis(550);
+        sampler.run(&|| Instant::now() >= deadline);
+        let ticks = calls.load(Ordering::Relaxed);
+
+        // Five or six ticks fit in 550ms at 100ms a tick.
+        assert!((3..=8).contains(&ticks), "{ticks} ticks in 550ms");
     }
 
     #[test]

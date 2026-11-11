@@ -291,6 +291,23 @@ pub fn net_bytes(process: &ProcessSample) -> u64 {
     process.net_rx_bytes_per_sec.unwrap_or(0) + process.net_tx_bytes_per_sec.unwrap_or(0)
 }
 
+/// One line of the watch view.
+pub fn watch_line(sample: &SystemSample) -> String {
+    let memory = &sample.memory;
+    let memory_percent = percent(memory.used_bytes, memory.total_bytes);
+    format!(
+        "[{}] cpu {:>5.1}%  mem {:>5.1}%  disk read {} write {}  net received {} sent {}  load {:.2}",
+        clock(sample.timestamp / 1_000),
+        sample.cpu.total_percent,
+        memory_percent,
+        rate(sample.disk.read_bytes_per_sec),
+        rate(sample.disk.write_bytes_per_sec),
+        rate(sample.network.rx_bytes_per_sec),
+        rate(sample.network.tx_bytes_per_sec),
+        sample.cpu.load_avg_1,
+    )
+}
+
 /// An alert, as it is shown on the terminal.
 pub fn alert_line(alert: &crate::alert::Alert) -> String {
     let severity = match alert.severity {

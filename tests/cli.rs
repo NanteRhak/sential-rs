@@ -376,6 +376,17 @@ fn killing_a_process_that_is_not_there_fails() {
 }
 
 #[test]
+fn watch_samples_at_the_requested_rate_and_stops_itself() {
+    let out = sentinel(&["watch", "--interval", "100ms", "--duration", "300ms"]);
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("sampling every 100ms"), "stdout: {stdout}");
+    let lines = stdout.lines().filter(|line| line.contains("cpu")).count();
+    assert!(lines >= 2, "only {lines} samples in 300ms:\n{stdout}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

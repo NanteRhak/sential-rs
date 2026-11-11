@@ -50,7 +50,14 @@ pub enum Command {
     /// Open the live terminal dashboard
     Tui,
     /// Sample at a high rate to catch short-lived spikes
-    Watch,
+    Watch {
+        /// How often to sample, for example 100ms
+        #[arg(long, value_name = "DURATION")]
+        interval: Option<String>,
+        /// How long to watch for before stopping
+        #[arg(long, value_name = "DURATION")]
+        duration: Option<String>,
+    },
     /// List recent alerts
     Alerts {
         /// Only alerts from the last window, for example 1h or 30m
