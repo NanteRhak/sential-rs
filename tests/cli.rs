@@ -540,6 +540,43 @@ fn the_daemon_runs_and_collects_samples() {
 }
 
 #[test]
+fn limit_refuses_a_protected_process() {
+    let dir = std::env::temp_dir().join(format!("sentinel-limit-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sentinel.toml"),
+        "[critical_processes]\nnames = [\"sleep\"]\n",
+    )
+    .unwrap();
+    let mut child = sleeping_child();
+    let pid = child.id();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .args(["limit", &pid.to_string(), "--cpu", "50", "--yes"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    let still_running = child.try_wait().unwrap().is_none();
+    let _ = child.kill();
+    let _ = child.wait();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(!out.status.success(), "exit status: {:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("protected"), "stderr: {stderr}");
+    assert!(still_running);
+}
+
+#[test]
+fn limit_without_any_limit_is_refused() {
+    let out = sentinel(&["limit", "1", "--yes"]);
+
+    assert!(!out.status.success(), "exit status: {:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--cpu"), "stderr: {stderr}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

@@ -106,6 +106,26 @@ pub enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Cap what a process may use
+    Limit {
+        /// The process to cap
+        pid: u32,
+        /// The share of one processor, as a percentage
+        #[arg(long, value_name = "PERCENT")]
+        cpu: Option<f64>,
+        /// The share of the machine's memory, as a percentage
+        #[arg(long, value_name = "PERCENT")]
+        memory: Option<f64>,
+        /// Take the limits off again
+        #[arg(long)]
+        remove: bool,
+        /// Do not ask for confirmation
+        #[arg(long)]
+        yes: bool,
+        /// Say what would happen without doing it
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Change a process priority
     Renice {
         /// The process to change

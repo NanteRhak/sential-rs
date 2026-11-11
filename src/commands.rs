@@ -31,6 +31,14 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
         Command::Resume { pid, yes, dry_run } => {
             signal_action(config, pid, "resume", libc::SIGCONT, yes, dry_run)
         }
+        Command::Limit {
+            pid,
+            cpu,
+            memory,
+            remove,
+            yes,
+            dry_run,
+        } => limit(config, pid, cpu, memory, remove, yes, dry_run),
         Command::Renice {
             pid,
             value,
@@ -263,6 +271,61 @@ fn renice(config: Config, pid: u32, value: i32, yes: bool, dry_run: bool) -> Res
             Err(error)
         }
     }
+}
+
+/// Cap what a process may use, with a cgroup.
+fn limit(
+    config: Config,
+    pid: u32,
+    cpu: Option<f64>,
+    memory: Option<f64>,
+    remove: bool,
+    yes: bool,
+    dry_run: bool,
+) -> Result<(), String> {
+    let target = check_target(&config, pid, "limit")?;
+    let root = std::path::PathBuf::from("/sys/fs/cgroup");
+    let limits = crate::cgroup::Limits {
+        cpu_percent: cpu,
+        memory_percent: memory,
+    };
+
+    if remove {
+        if dry_run {
+            println!("would take the limits off {target} ({pid})");
+            return Ok(());
+        }
+        let outcome = crate::cgroup::release(&root, pid)?;
+        record_action(&config, "limit", pid, &target.name, "user asked", &outcome);
+        println!("{outcome}");
+        return Ok(());
+    }
+
+    if limits.is_empty() {
+        return Err("no limit was given: use --cpu, --memory or --remove".into());
+    }
+
+    if config.actions.confirm && !yes && !confirm(&format!("limit {target} ({pid})? [y/N] ")) {
+        let result = "refused: the user said no".to_string();
+        record_action(&config, "limit", pid, &target.name, "user asked", &result);
+        return Err("cancelled".into());
+    }
+
+    if dry_run {
+        let result = "dry run: nothing was changed".to_string();
+        record_action(&config, "limit", pid, &target.name, "user asked", &result);
+        println!("would limit {target} ({pid}) to {limits:?}");
+        return Ok(());
+    }
+
+    let total_memory = crate::collect::proc::ProcFs::system()
+        .memory()
+        .map(|memory| memory.total_bytes)
+        .unwrap_or(0);
+    let outcome = crate::cgroup::apply(&root, pid, &limits, total_memory)?;
+    record_action(&config, "limit", pid, &target.name, "user asked", &outcome);
+    println!("{outcome}");
+    Ok(())
 }
 
 /// The process an action is aimed at.

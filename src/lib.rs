@@ -5,6 +5,7 @@
 
 pub mod action;
 pub mod alert;
+pub mod cgroup;
 pub mod cli;
 pub mod collect;
 pub mod commands;
