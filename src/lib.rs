@@ -10,6 +10,7 @@ pub mod collect;
 pub mod commands;
 pub mod config;
 pub mod core;
+pub mod exits;
 pub mod history;
 pub mod interrupt;
 pub mod sample;

@@ -14,6 +14,7 @@ use crate::collect::process;
 use crate::collect::{Collector, RawSnapshot, sample_between};
 use crate::core::metrics::SystemSample;
 use crate::core::process::ProcessSample;
+use crate::exits::{ExitRecord, ExitTracker};
 use crate::history::{CAPACITY, Ring};
 
 /// The latest published state. Cloning is cheap: it holds no locks.
@@ -24,6 +25,8 @@ pub struct SamplerState {
     pub processes: Vec<ProcessSample>,
     /// The alerts raised so far, oldest first.
     pub alerts: Vec<Alert>,
+    /// The processes that went away, oldest first.
+    pub exits: Vec<ExitRecord>,
 }
 
 /// What happens when an alert is raised.
@@ -89,6 +92,7 @@ pub struct Sampler {
     last_error: Option<String>,
     alerts: Option<AlertEngine>,
     on_alert: Option<AlertSink>,
+    tracker: ExitTracker,
 }
 
 impl Sampler {
@@ -104,6 +108,7 @@ impl Sampler {
             last_error: None,
             alerts: None,
             on_alert: None,
+            tracker: ExitTracker::new(),
         }
     }
 
@@ -184,11 +189,15 @@ impl Sampler {
         }
 
         alerts.truncate(50);
+        let mut exits = self.state().exits.clone();
+        exits.extend(self.tracker.observe(&processes));
+        exits.truncate(50);
         let state = Arc::new(SamplerState {
             tick: self.state().tick + 1,
             system,
             processes,
             alerts,
+            exits,
         });
         self.shared.publish(state.clone(), self.history_duration);
         state

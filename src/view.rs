@@ -291,6 +291,17 @@ pub fn net_bytes(process: &ProcessSample) -> u64 {
     process.net_rx_bytes_per_sec.unwrap_or(0) + process.net_tx_bytes_per_sec.unwrap_or(0)
 }
 
+/// An exit event, as it is shown.
+pub fn exit_line(exit: &crate::exits::ExitRecord) -> String {
+    format!(
+        "{} ({}) after {}: {}",
+        exit.process_name,
+        exit.pid,
+        crate::view::uptime(exit.last_uptime_secs),
+        exit.reason()
+    )
+}
+
 /// One line of the watch view.
 pub fn watch_line(sample: &SystemSample) -> String {
     let memory = &sample.memory;

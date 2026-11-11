@@ -318,8 +318,13 @@ fn watch(config: Config, interval: Option<String>, duration: Option<String>) -> 
         crate::interrupt::requested()
             || deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline)
     };
+    let seen_exits = std::cell::Cell::new(0);
     sampler.run_with(&stop, &|state| {
         println!("{}", view::watch_line(&state.system));
+        for exit in state.exits.iter().skip(seen_exits.get()) {
+            println!("[exit] {}", view::exit_line(exit));
+        }
+        seen_exits.set(state.exits.len());
     });
     Ok(())
 }

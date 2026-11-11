@@ -387,6 +387,21 @@ fn watch_samples_at_the_requested_rate_and_stops_itself() {
 }
 
 #[test]
+fn a_process_that_goes_away_is_recorded_as_an_exit() {
+    let mut child = Command::new("sleep").arg("1").spawn().unwrap();
+    let pid = child.id();
+
+    let out = sentinel(&["watch", "--interval", "100ms", "--duration", "2s"]);
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("[exit]"), "stdout: {stdout}");
+    assert!(stdout.contains(&pid.to_string()), "stdout: {stdout}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

@@ -262,6 +262,7 @@ impl App {
             system: SystemSample::default(),
             processes,
             alerts: Vec::new(),
+            exits: Vec::new(),
         };
         App::new(Arc::new(Shared::default())).with_state(state)
     }
@@ -276,6 +277,7 @@ impl App {
                 system: SystemSample::default(),
                 processes: Vec::new(),
                 alerts,
+                exits: Vec::new(),
             }),
             std::time::Duration::from_secs(600),
         );
@@ -293,6 +295,7 @@ impl App {
                     system,
                     processes: Vec::new(),
                     alerts: Vec::new(),
+                    exits: Vec::new(),
                 }),
                 std::time::Duration::from_secs(600),
             );
@@ -410,12 +413,14 @@ impl App {
     /// The recent alerts, with their severity.
     fn draw_alerts(&self, frame: &mut Frame, area: Rect) {
         let block = Block::default().borders(Borders::ALL).title(" Alerts ");
-        let alerts = &self.snapshot().alerts;
-        if alerts.is_empty() {
+        let state = self.snapshot();
+        let exits = &state.exits;
+        let alerts = &state.alerts;
+        if alerts.is_empty() && exits.is_empty() {
             frame.render_widget(Paragraph::new("no alerts").block(block), area);
             return;
         }
-        let lines: Vec<Line> = alerts
+        let mut lines: Vec<Line> = alerts
             .iter()
             .rev()
             .take(2)
@@ -434,6 +439,12 @@ impl App {
                 ])
             })
             .collect();
+        for exit in exits.iter().rev().take(1) {
+            lines.push(Line::from(vec![
+                Span::styled("[EXIT] ", Style::default().fg(Color::Magenta)),
+                Span::raw(crate::view::exit_line(exit)),
+            ]));
+        }
         frame.render_widget(Paragraph::new(lines).block(block), area);
     }
 
