@@ -4,6 +4,7 @@
 //! text and the collectors take a [`ProcFs`] root, so both can be tested against
 //! fixtures without a real `/proc`.
 
+pub mod filesystem;
 pub mod proc;
 
 use std::collections::HashMap;
@@ -24,6 +25,8 @@ pub struct RawSnapshot {
     pub network: HashMap<String, NetworkCounters>,
     pub load_avg: (f64, f64, f64),
     pub pressure: Option<PressureCounters>,
+    pub filesystems: Vec<filesystem::FilesystemCounters>,
+    pub notes: Vec<String>,
 }
 
 impl Default for RawSnapshot {
@@ -36,6 +39,8 @@ impl Default for RawSnapshot {
             network: HashMap::new(),
             load_avg: (0.0, 0.0, 0.0),
             pressure: None,
+            filesystems: Vec::new(),
+            notes: Vec::new(),
         }
     }
 }
@@ -219,7 +224,17 @@ pub fn sample_between(current: &RawSnapshot, previous: Option<&RawSnapshot>) -> 
         disk.devices.push(device);
     }
     sample.disk = disk;
-
+    sample.disk.filesystems = current
+        .filesystems
+        .iter()
+        .map(|fs| crate::core::metrics::FilesystemSample {
+            mount_point: fs.mount_point.clone(),
+            used_bytes: fs.used_bytes,
+            total_bytes: fs.total_bytes,
+            available_bytes: fs.available_bytes,
+        })
+        .collect();
+    sample.disk.notes = current.notes.clone();
     let mut network = crate::core::metrics::NetworkSample::default();
     for (name, now) in &current.network {
         let Some(before) = previous.network.get(name) else {

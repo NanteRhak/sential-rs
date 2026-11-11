@@ -4,10 +4,10 @@
 
 **Blocked by:** 04: `sentinel health`: CPU and memory summary.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The command gains a disk row with read and write bytes per second, read and write operations per second, a per-disk breakdown and filesystem usage percentage
-- [ ] Read and write rates are differenced between ticks
-- [ ] A device that disappears between ticks does not crash the command
-- [ ] A filesystem that cannot be read is skipped with a note instead of failing the whole command
-- [ ] A test asserts the disk row appears with the expected labels
+- [x] The command gains a disk row with read and write bytes per second, read and write operations per second, a per-disk breakdown and filesystem usage percentage
+- [x] Read and write rates are differenced between ticks
+- [x] A device that disappears between ticks does not crash the command
+- [x] A filesystem that cannot be read is skipped with a note instead of failing the whole command
+- [x] A test asserts the disk row appears with the expected labels

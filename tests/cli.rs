@@ -51,6 +51,17 @@ fn health_prints_the_cpu_memory_and_swap_rows() {
 }
 
 #[test]
+fn health_prints_the_disk_row() {
+    let out = sentinel(&["health", "--interval", "50ms"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(stdout.contains("Disk"), "output: {stdout}");
+    assert!(stdout.contains("Throughput"), "output: {stdout}");
+    assert!(stdout.contains("Filesystem"), "output: {stdout}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

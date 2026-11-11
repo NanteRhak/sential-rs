@@ -46,10 +46,34 @@ impl ProcFs {
         self.read("loadavg").and_then(|text| parse_loadavg(&text))
     }
 
+    /// Counters for whole disks. Partitions of a disk are left out, or the
+    /// totals would count the same bytes twice.
     pub fn disk_counters(&self) -> HashMap<String, DiskCounters> {
-        self.read("diskstats")
+        let all = self
+            .read("diskstats")
             .map(|text| parse_diskstats(&text))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let names: Vec<String> = all.keys().cloned().collect();
+        all.into_iter()
+            .filter(|(name, _)| is_whole_disk(name, &names))
+            .collect()
+    }
+
+    /// The capacity of every mounted filesystem, and a note for each one that
+    /// could not be read.
+    pub fn filesystems(&self) -> (Vec<super::filesystem::FilesystemCounters>, Vec<String>) {
+        let Some(mounts) = self.read("mounts") else {
+            return (Vec::new(), Vec::new());
+        };
+        let mut filesystems = Vec::new();
+        let mut notes = Vec::new();
+        for mount_point in super::filesystem::mount_points(&mounts) {
+            match super::filesystem::usage(&mount_point) {
+                Ok(counters) => filesystems.push(counters),
+                Err(error) => notes.push(error),
+            }
+        }
+        (filesystems, notes)
     }
 
     pub fn network_counters(&self) -> HashMap<String, NetworkCounters> {
@@ -98,6 +122,37 @@ pub fn parse_stat(text: &str) -> Option<CpuCounters> {
         }
     }
     found.then_some(counters)
+}
+
+/// Devices that never carry real traffic.
+const VIRTUAL_DEVICES: [&str; 5] = ["loop", "ram", "zram", "fd", "sr"];
+
+/// Whether a device is a whole disk rather than a partition of one.
+pub fn is_whole_disk(name: &str, all: &[String]) -> bool {
+    if VIRTUAL_DEVICES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+    {
+        return false;
+    }
+    match parent_device(name) {
+        Some(parent) => !all.iter().any(|other| other == parent),
+        None => true,
+    }
+}
+
+/// The disk a partition belongs to: `sda1` belongs to `sda`, `nvme0n1p1` to
+/// `nvme0n1`.
+fn parent_device(name: &str) -> Option<&str> {
+    if let Some((head, tail)) = name.rsplit_once('p')
+        && !head.is_empty()
+        && !tail.is_empty()
+        && tail.chars().all(|c| c.is_ascii_digit())
+    {
+        return Some(head);
+    }
+    let head = name.trim_end_matches(|c: char| c.is_ascii_digit());
+    (head.len() < name.len()).then_some(head)
 }
 
 /// The first number of a line, ignoring whatever follows it.
@@ -277,6 +332,7 @@ impl super::Collector for ProcCollector {
     fn collect(&mut self) -> Result<super::RawSnapshot, String> {
         let cpu = self.fs.cpu_counters().ok_or("cannot read /proc/stat")?;
         let memory = self.fs.memory().ok_or("cannot read /proc/meminfo")?;
+        let (filesystems, notes) = self.fs.filesystems();
         Ok(super::RawSnapshot {
             at: std::time::Instant::now(),
             cpu,
@@ -285,6 +341,8 @@ impl super::Collector for ProcCollector {
             network: self.fs.network_counters(),
             load_avg: self.fs.load_avg().unwrap_or_default(),
             pressure: self.fs.pressure(),
+            filesystems,
+            notes,
         })
     }
 }
@@ -378,6 +436,20 @@ mod tests {
         let counters = parse_pressure("some avg10=1.50 avg60=0.20 avg300=0.01 total=42\n").unwrap();
 
         assert!((counters.cpu_some - 1.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn partitions_are_left_out_of_the_disk_counters() {
+        let all: Vec<String> = ["sda", "sda1", "nvme0n1", "nvme0n1p1", "loop0"]
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+
+        assert!(is_whole_disk("sda", &all));
+        assert!(!is_whole_disk("sda1", &all));
+        assert!(is_whole_disk("nvme0n1", &all));
+        assert!(!is_whole_disk("nvme0n1p1", &all));
+        assert!(!is_whole_disk("loop0", &all));
     }
 
     #[test]

@@ -45,6 +45,8 @@ pub struct DiskSample {
     pub write_ops_per_sec: u64,
     pub devices: Vec<DiskDeviceSample>,
     pub filesystems: Vec<FilesystemSample>,
+    /// Filesystems that could not be read, and why.
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -62,6 +64,7 @@ pub struct FilesystemSample {
     pub mount_point: String,
     pub used_bytes: u64,
     pub total_bytes: u64,
+    pub available_bytes: u64,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -66,7 +66,71 @@ pub fn health(sample: &SystemSample) -> String {
             bytes_to_human(sample.memory.swap_used_bytes)
         ),
     ));
+    out.push('\n');
+    out.push_str(&disk_section(sample));
     out
+}
+
+/// The disk row: throughput, the per-disk breakdown and filesystem usage.
+fn disk_section(sample: &SystemSample) -> String {
+    let disk = &sample.disk;
+    let mut out = String::new();
+    out.push_str("Disk\n");
+    out.push_str(&row(
+        "Throughput",
+        &format!(
+            "read {}  write {}",
+            rate(disk.read_bytes_per_sec),
+            rate(disk.write_bytes_per_sec)
+        ),
+    ));
+    out.push_str(&row(
+        "Operations",
+        &format!(
+            "read {}/s  write {}/s",
+            disk.read_ops_per_sec, disk.write_ops_per_sec
+        ),
+    ));
+    if disk.devices.is_empty() {
+        out.push_str(&row("Devices", "no devices reported"));
+    } else {
+        for device in &disk.devices {
+            out.push_str(&row(
+                &format!("Device {}", device.device),
+                &format!(
+                    "read {}  write {}  {} ops read/s  {} ops write/s",
+                    rate(device.read_bytes_per_sec),
+                    rate(device.write_bytes_per_sec),
+                    device.read_ops_per_sec,
+                    device.write_ops_per_sec
+                ),
+            ));
+        }
+    }
+    if disk.filesystems.is_empty() {
+        out.push_str(&row("Filesystems", "no filesystems reported"));
+    } else {
+        for filesystem in &disk.filesystems {
+            let used_percent = percent(filesystem.used_bytes, filesystem.total_bytes);
+            out.push_str(&row(
+                &format!("Filesystem {}", filesystem.mount_point),
+                &format!(
+                    "{} used of {} ({used_percent:.1}%)",
+                    bytes_to_human(filesystem.used_bytes),
+                    bytes_to_human(filesystem.total_bytes)
+                ),
+            ));
+        }
+    }
+    for note in &disk.notes {
+        out.push_str(&row("Skipped", note));
+    }
+    out
+}
+
+/// A byte rate, in the largest unit that keeps it readable.
+fn rate(bytes_per_sec: u64) -> String {
+    format!("{}/s", bytes_to_human(bytes_per_sec))
 }
 
 /// One `label   value` line, with the label padded to a fixed width.
@@ -137,6 +201,44 @@ mod tests {
         assert!(text.contains("10.0% 15.0%"), "{text}");
         assert!(text.contains("16.0 GiB"), "{text}");
         assert!(text.contains("2.0 GiB total, 0 B used"), "{text}");
+    }
+
+    #[test]
+    fn the_disk_rows_carry_the_expected_labels() {
+        let sample = SystemSample {
+            disk: crate::core::metrics::DiskSample {
+                read_bytes_per_sec: 2048,
+                write_bytes_per_sec: 4096,
+                read_ops_per_sec: 10,
+                write_ops_per_sec: 20,
+                devices: vec![crate::core::metrics::DiskDeviceSample {
+                    device: "sda".into(),
+                    read_bytes_per_sec: 2048,
+                    write_bytes_per_sec: 4096,
+                    read_ops_per_sec: 10,
+                    write_ops_per_sec: 20,
+                    latency_ms: None,
+                }],
+                filesystems: vec![crate::core::metrics::FilesystemSample {
+                    mount_point: "/".into(),
+                    used_bytes: 50,
+                    total_bytes: 100,
+                    available_bytes: 50,
+                }],
+                notes: vec!["/mnt/x: cannot read".into()],
+            },
+            ..Default::default()
+        };
+
+        let text = health(&sample);
+
+        assert!(text.contains("Disk"), "{text}");
+        assert!(text.contains("Throughput"), "{text}");
+        assert!(text.contains("Operations"), "{text}");
+        assert!(text.contains("Device sda"), "{text}");
+        assert!(text.contains("Filesystem /"), "{text}");
+        assert!(text.contains("50.0%"), "{text}");
+        assert!(text.contains("/mnt/x: cannot read"), "{text}");
     }
 
     #[test]
