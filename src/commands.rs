@@ -19,10 +19,24 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
         Command::Watch => Err("watch is not implemented yet".into()),
         Command::Alerts { last } => alerts(config, last),
         Command::Inspect { pid } => inspect(config, pid),
-        Command::Kill { pid, yes, dry_run } => kill(config, pid, yes, dry_run),
-        Command::Suspend => Err("suspend is not implemented yet".into()),
-        Command::Resume => Err("resume is not implemented yet".into()),
-        Command::Renice => Err("renice is not implemented yet".into()),
+        Command::Kill {
+            pid,
+            signal,
+            yes,
+            dry_run,
+        } => kill(config, pid, signal, yes, dry_run),
+        Command::Suspend { pid, yes, dry_run } => {
+            signal_action(config, pid, "suspend", libc::SIGSTOP, yes, dry_run)
+        }
+        Command::Resume { pid, yes, dry_run } => {
+            signal_action(config, pid, "resume", libc::SIGCONT, yes, dry_run)
+        }
+        Command::Renice {
+            pid,
+            value,
+            yes,
+            dry_run,
+        } => renice(config, pid, value, yes, dry_run),
         Command::Report => Err("report is not implemented yet".into()),
         Command::Daemon => Err("daemon is not implemented yet".into()),
     }
@@ -106,57 +120,144 @@ pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
 }
 
 /// Terminate a process, carefully.
-fn kill(config: Config, pid: u32, yes: bool, dry_run: bool) -> Result<(), String> {
+/// Terminate a process, carefully.
+fn kill(
+    config: Config,
+    pid: u32,
+    signal: Option<String>,
+    yes: bool,
+    dry_run: bool,
+) -> Result<(), String> {
+    let signal = match signal {
+        Some(text) => {
+            crate::action::parse_signal(&text).map_err(|error| format!("--signal: {error}"))?
+        }
+        None => libc::SIGTERM,
+    };
+    signal_action(config, pid, "kill", signal, yes, dry_run)
+}
+
+/// Send a signal to a process, carefully.
+fn signal_action(
+    config: Config,
+    pid: u32,
+    action: &str,
+    signal: i32,
+    yes: bool,
+    dry_run: bool,
+) -> Result<(), String> {
+    let target = check_target(&config, pid, action)?;
+    let signal_name = crate::action::signal_name(signal);
+
+    if dry_run {
+        let result = "dry run: nothing was sent".to_string();
+        record_action(&config, action, pid, &target.name, "user asked", &result);
+        println!("would {action} {target} ({pid}) with {signal_name}");
+        return Ok(());
+    }
+
+    if config.actions.confirm && !yes && !confirm(&format!("{action} {target} ({pid})? [y/N] ")) {
+        let result = "refused: the user said no".to_string();
+        record_action(&config, action, pid, &target.name, "user asked", &result);
+        return Err("cancelled".into());
+    }
+
+    // The PID may have been given to another process while we were asking.
+    if crate::action::start_time(pid) != Some(target.start_time) {
+        let result = "refused: the process changed".to_string();
+        record_action(&config, action, pid, &target.name, "user asked", &result);
+        return Err(format!(
+            "process {pid} changed while confirming, refusing to act on it"
+        ));
+    }
+
+    match crate::action::send_signal(pid, signal) {
+        Ok(()) => {
+            let result = format!("sent {signal_name}");
+            record_action(&config, action, pid, &target.name, "user asked", &result);
+            println!("sent {signal_name} to {target} ({pid})");
+            Ok(())
+        }
+        Err(error) => {
+            let result = format!("failed: {error}");
+            record_action(&config, action, pid, &target.name, "user asked", &result);
+            Err(error)
+        }
+    }
+}
+
+/// Change the priority of a process, carefully.
+fn renice(config: Config, pid: u32, value: i32, yes: bool, dry_run: bool) -> Result<(), String> {
+    let target = check_target(&config, pid, "renice")?;
+
+    if dry_run {
+        let result = "dry run: nothing was changed".to_string();
+        record_action(&config, "renice", pid, &target.name, "user asked", &result);
+        println!("would renice {target} ({pid}) to {value}");
+        return Ok(());
+    }
+
+    if config.actions.confirm
+        && !yes
+        && !confirm(&format!("renice {target} ({pid}) to {value}? [y/N] "))
+    {
+        let result = "refused: the user said no".to_string();
+        record_action(&config, "renice", pid, &target.name, "user asked", &result);
+        return Err("cancelled".into());
+    }
+
+    if crate::action::start_time(pid) != Some(target.start_time) {
+        let result = "refused: the process changed".to_string();
+        record_action(&config, "renice", pid, &target.name, "user asked", &result);
+        return Err(format!(
+            "process {pid} changed while confirming, refusing to act on it"
+        ));
+    }
+
+    match crate::action::renice(pid, value) {
+        Ok(()) => {
+            let result = format!("priority set to {value}");
+            record_action(&config, "renice", pid, &target.name, "user asked", &result);
+            println!("reniced {target} ({pid}) to {value}");
+            Ok(())
+        }
+        Err(error) => {
+            let result = format!("failed: {error}");
+            record_action(&config, "renice", pid, &target.name, "user asked", &result);
+            Err(error)
+        }
+    }
+}
+
+/// The process an action is aimed at.
+struct Target {
+    name: String,
+    /// The start time, so the PID can be checked again before acting.
+    start_time: u64,
+}
+
+impl std::fmt::Display for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+/// Check that the process is there and that it may be touched.
+fn check_target(config: &Config, pid: u32, action: &str) -> Result<Target, String> {
     let Some(name) = crate::action::process_name(pid) else {
         return Err(format!("no process {pid}"));
     };
     let Some(start_time) = crate::action::start_time(pid) else {
         return Err(format!("no process {pid}"));
     };
-
     if let Some(rule) = crate::action::protection(&name, &config.critical_processes.names) {
         let result = format!("refused: protected by the {rule} rule");
-        record_action(&config, "kill", pid, &name, "user asked", &result);
+        record_action(config, action, pid, &name, "user asked", &result);
         return Err(format!(
             "{name} is protected by the critical_processes rule ({rule})"
         ));
     }
-
-    if dry_run {
-        let result = "dry run: nothing was sent".to_string();
-        record_action(&config, "kill", pid, &name, "user asked", &result);
-        println!("would kill {name} ({pid}) with SIGTERM");
-        return Ok(());
-    }
-
-    if config.actions.confirm && !yes && !confirm(&format!("Kill {name} ({pid})? [y/N] ")) {
-        let result = "refused: the user said no".to_string();
-        record_action(&config, "kill", pid, &name, "user asked", &result);
-        return Err("cancelled".into());
-    }
-
-    // The PID may have been given to another process while we were asking.
-    if crate::action::start_time(pid) != Some(start_time) {
-        let result = "refused: the process changed".to_string();
-        record_action(&config, "kill", pid, &name, "user asked", &result);
-        return Err(format!(
-            "process {pid} changed while confirming, refusing to kill it"
-        ));
-    }
-
-    match crate::action::send_signal(pid, libc::SIGTERM) {
-        Ok(()) => {
-            let result = "sent SIGTERM".to_string();
-            record_action(&config, "kill", pid, &name, "user asked", &result);
-            println!("sent SIGTERM to {name} ({pid})");
-            Ok(())
-        }
-        Err(error) => {
-            let result = format!("failed: {error}");
-            record_action(&config, "kill", pid, &name, "user asked", &result);
-            Err(error)
-        }
-    }
+    Ok(Target { name, start_time })
 }
 
 /// Ask the user a yes or no question.

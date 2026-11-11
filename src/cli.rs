@@ -66,6 +66,9 @@ pub enum Command {
     Kill {
         /// The process to terminate
         pid: u32,
+        /// The signal to send, by name or number
+        #[arg(long, value_name = "SIGNAL")]
+        signal: Option<String>,
         /// Do not ask for confirmation
         #[arg(long)]
         yes: bool,
@@ -74,11 +77,40 @@ pub enum Command {
         dry_run: bool,
     },
     /// Suspend a process
-    Suspend,
+    Suspend {
+        /// The process to stop
+        pid: u32,
+        /// Do not ask for confirmation
+        #[arg(long)]
+        yes: bool,
+        /// Say what would happen without doing it
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Resume a process
-    Resume,
+    Resume {
+        /// The process to continue
+        pid: u32,
+        /// Do not ask for confirmation
+        #[arg(long)]
+        yes: bool,
+        /// Say what would happen without doing it
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Change a process priority
-    Renice,
+    Renice {
+        /// The process to change
+        pid: u32,
+        /// The new priority, lower is more important
+        value: i32,
+        /// Do not ask for confirmation
+        #[arg(long)]
+        yes: bool,
+        /// Say what would happen without doing it
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Summarise what happened over a time window
     Report,
     /// Run in the background

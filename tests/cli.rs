@@ -313,6 +313,60 @@ fn kill_writes_to_the_action_log() {
 }
 
 #[test]
+fn suspend_stops_the_process_and_resume_starts_it_again() {
+    let mut child = sleeping_child();
+    let pid = child.id();
+
+    let out = sentinel(&["suspend", &pid.to_string(), "--yes"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("SIGSTOP"), "stdout: {stdout}");
+
+    let state = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+    assert!(state.contains(" T "), "the process is not stopped: {state}");
+
+    let out = sentinel(&["resume", &pid.to_string(), "--yes"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("SIGCONT"), "stdout: {stdout}");
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[test]
+fn renice_changes_the_priority_of_a_process() {
+    let mut child = sleeping_child();
+    let pid = child.id();
+
+    let out = sentinel(&["renice", &pid.to_string(), "5", "--yes"]);
+    let state = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("reniced"), "stdout: {stdout}");
+    // Field 19 of /proc/<pid>/stat is the nice value.
+    let fields: Vec<&str> = state
+        .rsplit(')')
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .collect();
+    assert_eq!(fields[16], "5", "the nice value did not change: {state}");
+}
+
+#[test]
+fn an_unknown_signal_is_refused() {
+    let out = sentinel(&["kill", "1", "--signal", "SIGBOGUS", "--yes"]);
+
+    assert!(!out.status.success(), "exit status: {:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--signal"), "stderr: {stderr}");
+}
+
+#[test]
 fn killing_a_process_that_is_not_there_fails() {
     let out = sentinel(&["kill", "999999999", "--yes"]);
 

@@ -4,11 +4,11 @@
 
 **Blocked by:** 16: `sentinel kill`: safe manual termination with action log.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `sentinel kill --signal <sig>` sends a chosen signal to the target process
-- [ ] `sentinel suspend <pid>` and `sentinel resume <pid>` stop and continue the process
-- [ ] `sentinel renice <pid> <value>` changes the process priority
-- [ ] Each action re-validates the PID, supports `--dry-run` and is written to the action log
-- [ ] Actions needing extra privileges report the missing permission clearly instead of failing silently
-- [ ] Protected processes are refused
+- [x] `sentinel kill --signal <sig>` sends a chosen signal to the target process
+- [x] `sentinel suspend <pid>` and `sentinel resume <pid>` stop and continue the process
+- [x] `sentinel renice <pid> <value>` changes the process priority
+- [x] Each action re-validates the PID, supports `--dry-run` and is written to the action log
+- [x] Actions needing extra privileges report the missing permission clearly instead of failing silently
+- [x] Protected processes are refused

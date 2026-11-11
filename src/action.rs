@@ -80,6 +80,55 @@ pub fn read_records(path: &Path) -> Vec<ActionRecord> {
         .collect()
 }
 
+/// The signals that can be sent by name.
+pub const SIGNALS: [(&str, i32); 10] = [
+    ("HUP", libc::SIGHUP),
+    ("INT", libc::SIGINT),
+    ("TERM", libc::SIGTERM),
+    ("KILL", libc::SIGKILL),
+    ("STOP", libc::SIGSTOP),
+    ("CONT", libc::SIGCONT),
+    ("USR1", libc::SIGUSR1),
+    ("USR2", libc::SIGUSR2),
+    ("QUIT", libc::SIGQUIT),
+    ("ALRM", libc::SIGALRM),
+];
+
+/// A signal by name, such as `SIGTERM`, or by number.
+pub fn parse_signal(text: &str) -> Result<i32, String> {
+    let text = text.trim();
+    let name = text.trim_start_matches("SIG").to_uppercase();
+    if let Some((_, signal)) = SIGNALS.iter().find(|(known, _)| *known == name) {
+        return Ok(*signal);
+    }
+    text.parse::<i32>()
+        .map_err(|_| format!("unknown signal `{text}`"))
+}
+
+/// The name of a signal, for messages.
+pub fn signal_name(signal: i32) -> String {
+    match SIGNALS.iter().find(|(_, known)| *known == signal) {
+        Some((name, _)) => format!("SIG{name}"),
+        None => format!("signal {signal}"),
+    }
+}
+
+/// Change the priority of a process. Lower is more important.
+pub fn renice(pid: u32, value: i32) -> Result<(), String> {
+    let result = unsafe { libc::setpriority(libc::PRIO_PROCESS, pid, value) };
+    if result != 0 {
+        let error = std::io::Error::last_os_error();
+        let reason = match error.raw_os_error() {
+            Some(libc::EACCES) | Some(libc::EPERM) => {
+                "you do not have permission to change its priority".to_string()
+            }
+            _ => error.to_string(),
+        };
+        return Err(format!("cannot renice process {pid}: {reason}"));
+    }
+    Ok(())
+}
+
 /// Where the action log is written.
 pub fn log_path(configured: Option<&PathBuf>) -> Option<PathBuf> {
     configured.cloned()
