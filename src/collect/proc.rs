@@ -89,6 +89,21 @@ impl ProcFs {
         interfaces
     }
 
+    /// Seconds since boot, used to work out how long a process has been running.
+    pub fn uptime(&self) -> f64 {
+        self.read("uptime")
+            .and_then(|text| text.split_whitespace().next()?.parse().ok())
+            .unwrap_or(0.0)
+    }
+
+    /// Every process on the machine. One that exits mid-scan is simply missing.
+    pub fn processes(&self) -> Vec<super::process::ProcessCounters> {
+        super::process::pids(&self.root)
+            .into_iter()
+            .filter_map(|pid| super::process::read(&self.root, pid))
+            .collect()
+    }
+
     pub fn pressure(&self) -> Option<PressureCounters> {
         let cpu = self
             .read("pressure/cpu")
@@ -363,6 +378,8 @@ impl super::Collector for ProcCollector {
             filesystems,
             notes,
             sensors: self.sys.readings(),
+            processes: self.fs.processes(),
+            uptime_secs: self.fs.uptime(),
         })
     }
 }

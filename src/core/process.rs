@@ -1,6 +1,6 @@
 //! Per-process samples.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ProcessSample {
     pub timestamp: u64,
     pub pid: u32,
@@ -11,6 +11,8 @@ pub struct ProcessSample {
     pub cpu_percent: f64,
     pub mem_rss_bytes: u64,
     pub mem_vsz_bytes: u64,
+    /// Share of the machine's memory this process holds.
+    pub mem_percent: f64,
     pub read_bytes_per_sec: u64,
     pub write_bytes_per_sec: u64,
     /// `None` when the platform cannot attribute network traffic to a process.
@@ -21,6 +23,9 @@ pub struct ProcessSample {
     pub state: ProcessState,
     pub nice: i32,
     pub pressure_score: f64,
+    /// Seconds since the process started.
+    pub uptime_secs: u64,
+    pub ppid: u32,
 }
 
 /// The one-letter process states reported by Linux.

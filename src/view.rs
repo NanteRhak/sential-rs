@@ -1,7 +1,9 @@
 //! Text views: the one-screen summaries the CLI prints.
 
+use crate::collect::process::state_letter;
 use crate::core::format::bytes_to_human;
 use crate::core::metrics::SystemSample;
+use crate::core::process::ProcessSample;
 
 const LABEL: usize = 18;
 
@@ -231,6 +233,45 @@ fn disk_section(sample: &SystemSample) -> String {
     out
 }
 
+/// The `sentinel ps` table.
+pub fn processes(processes: &[ProcessSample]) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{:>7}  {:>7}  {:<10}  {:<5}  {:>9}  {:>10}  {:>10}  {:>6}  {}\n",
+        "PID", "PPID", "USER", "STATE", "ELAPSED", "RSS", "VSZ", "MEM%", "NAME"
+    ));
+    for process in processes {
+        out.push_str(&format!(
+            "{:>7}  {:>7}  {:<10}  {:<5}  {:>9}  {:>10}  {:>10}  {:>5.1}%  {}\n",
+            process.pid,
+            process.ppid,
+            process.user,
+            state_letter(process.state),
+            uptime(process.uptime_secs),
+            bytes_to_human(process.mem_rss_bytes),
+            bytes_to_human(process.mem_vsz_bytes),
+            process.mem_percent,
+            process.name,
+        ));
+    }
+    out
+}
+
+/// How long a process has been running, in the units a person expects.
+pub fn uptime(seconds: u64) -> String {
+    let days = seconds / 86_400;
+    let hours = (seconds % 86_400) / 3_600;
+    let minutes = (seconds % 3_600) / 60;
+    let seconds = seconds % 60;
+    if days > 0 {
+        format!("{days}d {hours:02}:{minutes:02}")
+    } else if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
+}
+
 /// A byte rate, in the largest unit that keeps it readable.
 fn rate(bytes_per_sec: u64) -> String {
     format!("{}/s", bytes_to_human(bytes_per_sec))
@@ -382,6 +423,37 @@ mod tests {
         let text = health(&SystemSample::default(), false, true);
 
         assert!(!text.contains("Network"), "{text}");
+    }
+
+    #[test]
+    fn the_process_table_has_a_header_and_a_row() {
+        let sample = ProcessSample {
+            pid: 42,
+            ppid: 1,
+            name: "sleep".into(),
+            user: "root".into(),
+            state: crate::core::process::ProcessState::Sleeping,
+            mem_rss_bytes: 1024 * 1024,
+            mem_vsz_bytes: 4 * 1024 * 1024,
+            mem_percent: 1.5,
+            uptime_secs: 3_661,
+            ..Default::default()
+        };
+
+        let text = processes(&[sample]);
+
+        assert!(text.contains("PID"), "{text}");
+        assert!(text.contains("MEM%"), "{text}");
+        assert!(text.contains("sleep"), "{text}");
+        assert!(text.contains("1.0 MiB"), "{text}");
+        assert!(text.contains("1:01:01"), "{text}");
+    }
+
+    #[test]
+    fn uptime_is_shown_in_the_units_a_person_expects() {
+        assert_eq!(uptime(30), "00:30");
+        assert_eq!(uptime(3_661), "1:01:01");
+        assert_eq!(uptime(90_061), "1d 01:01");
     }
 
     #[test]

@@ -9,14 +9,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::collect::process;
 use crate::collect::{Collector, RawSnapshot, sample_between};
 use crate::core::metrics::SystemSample;
+use crate::core::process::ProcessSample;
 
 /// The latest published state. Cloning is cheap: it holds no locks.
 #[derive(Debug, Clone, Default)]
 pub struct SamplerState {
     pub tick: u64,
     pub system: SystemSample,
+    pub processes: Vec<ProcessSample>,
 }
 
 /// Publishes samples on a fixed interval.
@@ -70,11 +73,25 @@ impl Sampler {
         };
         self.last_error = None;
         let system = sample_between(&reading, self.previous.as_ref());
+        let processes = match self.previous.as_ref() {
+            Some(before) => {
+                let elapsed = reading.at.duration_since(before.at).as_secs_f64();
+                process::process_samples(
+                    &reading.processes,
+                    &before.processes,
+                    reading.uptime_secs,
+                    reading.memory.total_bytes,
+                    elapsed,
+                )
+            }
+            None => Vec::new(),
+        };
         self.previous = Some(reading);
 
         let state = Arc::new(SamplerState {
             tick: self.state().tick + 1,
             system,
+            processes,
         });
         if let Ok(mut slot) = self.state.write() {
             *slot = state.clone();

@@ -6,6 +6,7 @@
 
 pub mod filesystem;
 pub mod proc;
+pub mod process;
 pub mod sensors;
 
 use std::collections::HashMap;
@@ -29,6 +30,8 @@ pub struct RawSnapshot {
     pub filesystems: Vec<filesystem::FilesystemCounters>,
     pub notes: Vec<String>,
     pub sensors: sensors::SensorReadings,
+    pub processes: Vec<process::ProcessCounters>,
+    pub uptime_secs: f64,
 }
 
 impl Default for RawSnapshot {
@@ -44,6 +47,8 @@ impl Default for RawSnapshot {
             filesystems: Vec::new(),
             notes: Vec::new(),
             sensors: sensors::SensorReadings::default(),
+            processes: Vec::new(),
+            uptime_secs: 0.0,
         }
     }
 }

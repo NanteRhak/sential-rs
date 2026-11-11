@@ -12,7 +12,7 @@ use crate::view;
 pub fn run(command: Command, config: Config) -> Result<(), String> {
     match command {
         Command::Health { interval, loopback } => health(config, interval, loopback),
-        Command::Ps => Err("ps is not implemented yet".into()),
+        Command::Ps => ps(config),
         Command::Top => Err("top is not implemented yet".into()),
         Command::Tui => Err("tui is not implemented yet".into()),
         Command::Watch => Err("watch is not implemented yet".into()),
@@ -43,6 +43,16 @@ fn health(config: Config, interval: Option<String>, loopback: bool) -> Result<()
             config.ui.show_temperature,
         )
     );
+    Ok(())
+}
+
+fn ps(config: Config) -> Result<(), String> {
+    let mut sampler = Sampler::new(config.general.interval, Box::new(ProcCollector::default()));
+    let state = sampler.warm_sample();
+    if let Some(error) = sampler.last_error() {
+        return Err(format!("cannot read system metrics: {error}"));
+    }
+    print!("{}", view::processes(&state.processes));
     Ok(())
 }
 
