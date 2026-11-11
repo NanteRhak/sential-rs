@@ -19,6 +19,7 @@ pub enum SortKey {
     Cpu,
     Mem,
     Name,
+    Pressure,
 }
 
 #[derive(Subcommand)]

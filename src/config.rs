@@ -19,6 +19,7 @@ pub struct Config {
     pub alerts: Alerts,
     pub actions: Actions,
     pub detection: Detection,
+    pub pressure: Pressure,
     pub critical_processes: CriticalProcesses,
 }
 
@@ -234,6 +235,45 @@ impl Condition {
             Condition::Above => value > threshold,
             Condition::Below => value < threshold,
             Condition::Spike => false,
+        }
+    }
+}
+
+/// How much each resource counts towards the pressure score.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Pressure {
+    pub cpu_weight: f64,
+    pub memory_weight: f64,
+    pub io_weight: f64,
+    pub network_weight: f64,
+    pub file_descriptor_weight: f64,
+    pub restart_weight: f64,
+}
+
+impl Default for Pressure {
+    fn default() -> Self {
+        Self {
+            cpu_weight: 1.0,
+            memory_weight: 1.0,
+            io_weight: 1.0,
+            network_weight: 1.0,
+            file_descriptor_weight: 1.0,
+            restart_weight: 1.0,
+        }
+    }
+}
+
+impl Pressure {
+    /// The weights, as the scorer wants them.
+    pub fn weights(&self) -> crate::pressure::Weights {
+        crate::pressure::Weights {
+            cpu: self.cpu_weight,
+            memory: self.memory_weight,
+            io: self.io_weight,
+            network: self.network_weight,
+            file_descriptors: self.file_descriptor_weight,
+            restarts: self.restart_weight,
         }
     }
 }
@@ -702,6 +742,20 @@ mod tests {
 
         assert_eq!(c.alerts.rules[1].condition, Condition::Below);
         assert!(!c.alerts.rules[1].enabled);
+    }
+
+    #[test]
+    fn the_pressure_weights_are_read() {
+        let c = Config::from_toml(
+            "[pressure]\ncpu_weight = 2.0\nmemory_weight = 0.5\nrestart_weight = 3.0\n",
+        )
+        .unwrap();
+
+        let weights = c.pressure.weights();
+        assert_eq!(weights.cpu, 2.0);
+        assert_eq!(weights.memory, 0.5);
+        assert_eq!(weights.restarts, 3.0);
+        assert_eq!(weights.io, 1.0);
     }
 
     #[test]

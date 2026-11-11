@@ -14,6 +14,7 @@ pub mod exits;
 pub mod history;
 pub mod interrupt;
 pub mod oom;
+pub mod pressure;
 pub mod sample;
 pub mod tui;
 pub mod view;

@@ -90,6 +90,14 @@ impl ExitTracker {
         self
     }
 
+    /// How many times each process has been seen to exit.
+    pub fn restart_counts(&self) -> HashMap<String, u32> {
+        self.restarts
+            .iter()
+            .map(|(name, times)| (name.clone(), times.len() as u32))
+            .collect()
+    }
+
     /// The processes that keep coming back.
     pub fn restart_loops(&self) -> Vec<RestartLoop> {
         let window = self.restart_window.as_millis() as u64;

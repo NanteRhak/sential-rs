@@ -402,6 +402,15 @@ fn a_process_that_goes_away_is_recorded_as_an_exit() {
 }
 
 #[test]
+fn ps_shows_the_pressure_score_and_can_sort_by_it() {
+    let out = sentinel(&["ps", "--sort", "pressure"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(stdout.contains("PRS"), "output: {stdout}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

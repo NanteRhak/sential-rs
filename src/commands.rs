@@ -106,7 +106,8 @@ pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
             config.detection.restart_count,
             config.detection.restart_window,
             config.detection.oom_evidence,
-        );
+        )
+        .with_pressure(config.pressure.weights());
     if !config.alerts.enabled || config.alerts.rules.is_empty() {
         return sampler;
     }

@@ -738,6 +738,7 @@ pub fn sort_label(sort: Sort) -> &'static str {
         Sort::Name => "name",
         Sort::Io => "i/o",
         Sort::Net => "network",
+        Sort::Pressure => "pressure",
     }
 }
 

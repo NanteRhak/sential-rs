@@ -242,6 +242,7 @@ pub enum Sort {
     Name,
     Io,
     Net,
+    Pressure,
 }
 
 impl Sort {
@@ -250,6 +251,7 @@ impl Sort {
             crate::cli::SortKey::Cpu => Sort::Cpu,
             crate::cli::SortKey::Mem => Sort::Mem,
             crate::cli::SortKey::Name => Sort::Name,
+            crate::cli::SortKey::Pressure => Sort::Pressure,
         }
     }
 }
@@ -276,6 +278,12 @@ pub fn sort_processes(processes: &mut [ProcessSample], sort: Sort) {
         Sort::Net => processes.sort_by(|a, b| {
             net_bytes(b)
                 .cmp(&net_bytes(a))
+                .then_with(|| a.pid.cmp(&b.pid))
+        }),
+        Sort::Pressure => processes.sort_by(|a, b| {
+            b.pressure_score
+                .partial_cmp(&a.pressure_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| a.pid.cmp(&b.pid))
         }),
     }
@@ -414,12 +422,12 @@ pub fn processes_json(processes: &[ProcessSample]) -> String {
 pub fn processes(processes: &[ProcessSample]) -> String {
     let mut out = String::new();
     out.push_str(&format!(
-        "{:>7}  {:>7}  {:<10}  {:<5}  {:>6}  {:>9}  {:>10}  {:>10}  {:>6}  {}\n",
-        "PID", "PPID", "USER", "STATE", "CPU%", "ELAPSED", "RSS", "VSZ", "MEM%", "NAME"
+        "{:>7}  {:>7}  {:<10}  {:<5}  {:>6}  {:>9}  {:>10}  {:>10}  {:>6}  {:>6}  {}\n",
+        "PID", "PPID", "USER", "STATE", "CPU%", "ELAPSED", "RSS", "VSZ", "MEM%", "PRS", "NAME"
     ));
     for process in processes {
         out.push_str(&format!(
-            "{:>7}  {:>7}  {:<10}  {:<5}  {:>5.1}  {:>9}  {:>10}  {:>10}  {:>5.1}%  {}\n",
+            "{:>7}  {:>7}  {:<10}  {:<5}  {:>5.1}  {:>9}  {:>10}  {:>10}  {:>5.1}%  {:>5.1}  {}\n",
             process.pid,
             process.ppid,
             process.user,
@@ -429,6 +437,7 @@ pub fn processes(processes: &[ProcessSample]) -> String {
             bytes_to_human(process.mem_rss_bytes),
             bytes_to_human(process.mem_vsz_bytes),
             process.mem_percent,
+            process.pressure_score,
             process.name,
         ));
     }

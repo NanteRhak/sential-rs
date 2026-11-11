@@ -95,6 +95,7 @@ pub struct Sampler {
     alerts: Option<AlertEngine>,
     on_alert: Option<AlertSink>,
     tracker: ExitTracker,
+    weights: crate::pressure::Weights,
 }
 
 impl Sampler {
@@ -111,7 +112,14 @@ impl Sampler {
             alerts: None,
             on_alert: None,
             tracker: ExitTracker::new(),
+            weights: crate::pressure::Weights::default(),
         }
+    }
+
+    /// How much each resource counts towards the pressure score.
+    pub fn with_pressure(mut self, weights: crate::pressure::Weights) -> Self {
+        self.weights = weights;
+        self
     }
 
     /// Collect from somewhere other than the operating system.
@@ -203,6 +211,13 @@ impl Sampler {
         }
 
         alerts.truncate(50);
+        let mut processes = processes;
+        crate::pressure::apply_scores(
+            &mut processes,
+            &self.tracker.restart_counts(),
+            &self.weights,
+        );
+
         let mut exits = self.state().exits.clone();
         exits.extend(self.tracker.observe(&processes));
         exits.truncate(50);
