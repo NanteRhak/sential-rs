@@ -240,6 +240,8 @@ pub enum Sort {
     Cpu,
     Mem,
     Name,
+    Io,
+    Net,
 }
 
 impl Sort {
@@ -266,7 +268,27 @@ pub fn sort_processes(processes: &mut [ProcessSample], sort: Sort) {
                 .then_with(|| a.pid.cmp(&b.pid))
         }),
         Sort::Name => processes.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.pid.cmp(&b.pid))),
+        Sort::Io => processes.sort_by(|a, b| {
+            io_bytes(b)
+                .cmp(&io_bytes(a))
+                .then_with(|| a.pid.cmp(&b.pid))
+        }),
+        Sort::Net => processes.sort_by(|a, b| {
+            net_bytes(b)
+                .cmp(&net_bytes(a))
+                .then_with(|| a.pid.cmp(&b.pid))
+        }),
     }
+}
+
+/// The bytes a process reads and writes in a second.
+pub fn io_bytes(process: &ProcessSample) -> u64 {
+    process.read_bytes_per_sec + process.write_bytes_per_sec
+}
+
+/// The bytes a process sends and receives in a second.
+pub fn net_bytes(process: &ProcessSample) -> u64 {
+    process.net_rx_bytes_per_sec.unwrap_or(0) + process.net_tx_bytes_per_sec.unwrap_or(0)
 }
 
 /// The process list as JSON, for scripting.

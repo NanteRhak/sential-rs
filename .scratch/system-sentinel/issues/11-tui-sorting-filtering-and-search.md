@@ -4,10 +4,10 @@
 
 **Blocked by:** 10: TUI: system summary and live process table.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `t`, `m`, `i` and `N` sort the process table by CPU, memory, disk I/O and network respectively, and the active sort is visible
-- [ ] `f` filters the table to a single resource type and `/` searches by process name, with a visible prompt while filtering
-- [ ] Clearing a filter or a search restores the full list
-- [ ] Filtering and searching happen over the live table without restarting collection
-- [ ] A test drives the key handlers and asserts the visible rows change
+- [x] `t`, `m`, `i` and `N` sort the process table by CPU, memory, disk I/O and network respectively, and the active sort is visible
+- [x] `f` filters the table to a single resource type and `/` searches by process name, with a visible prompt while filtering
+- [x] Clearing a filter or a search restores the full list
+- [x] Filtering and searching happen over the live table without restarting collection
+- [x] A test drives the key handlers and asserts the visible rows change

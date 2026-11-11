@@ -14,6 +14,26 @@ use crate::core::process::ProcessSample;
 use crate::sample::SamplerState;
 use crate::view::Sort;
 
+/// The resource the table is narrowed to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resource {
+    Cpu,
+    Memory,
+    Io,
+    Network,
+}
+
+impl Resource {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Resource::Cpu => "cpu",
+            Resource::Memory => "memory",
+            Resource::Io => "i/o",
+            Resource::Network => "network",
+        }
+    }
+}
+
 /// What the dashboard is showing.
 pub struct App {
     state: Arc<RwLock<Arc<SamplerState>>>,
@@ -22,6 +42,12 @@ pub struct App {
     pub should_quit: bool,
     /// A message shown along the bottom, such as what the last key did.
     pub status: String,
+    /// The resource the table is narrowed to, if any.
+    pub filter: Option<Resource>,
+    /// The name being searched for, if any.
+    pub search: Option<String>,
+    /// The search being typed, before it is applied.
+    pub typing: Option<String>,
 }
 
 impl App {
@@ -32,7 +58,80 @@ impl App {
             selected: 0,
             should_quit: false,
             status: String::new(),
+            filter: None,
+            search: None,
+            typing: None,
         }
+    }
+
+    /// An app showing a known set of processes, for tests.
+    #[cfg(test)]
+    pub fn with_processes(processes: Vec<ProcessSample>) -> App {
+        let state = SamplerState {
+            tick: 1,
+            system: SystemSample::default(),
+            processes,
+        };
+        App::new(Arc::new(RwLock::new(Arc::new(state))))
+    }
+
+    /// Narrow the table to the next resource, and back to everything after
+    /// the last one.
+    pub fn cycle_filter(&mut self) {
+        self.filter = match self.filter {
+            None => Some(Resource::Cpu),
+            Some(Resource::Cpu) => Some(Resource::Memory),
+            Some(Resource::Memory) => Some(Resource::Io),
+            Some(Resource::Io) => Some(Resource::Network),
+            Some(Resource::Network) => None,
+        };
+    }
+
+    /// Start typing a search.
+    pub fn start_search(&mut self) {
+        self.typing = Some(String::new());
+    }
+
+    pub fn type_char(&mut self, character: char) {
+        if let Some(typing) = self.typing.as_mut() {
+            typing.push(character);
+        }
+    }
+
+    pub fn backspace(&mut self) {
+        if let Some(typing) = self.typing.as_mut() {
+            typing.pop();
+        }
+    }
+
+    /// Apply the search being typed. An empty search shows everything again.
+    pub fn apply_search(&mut self) {
+        if let Some(typing) = self.typing.take() {
+            self.search = if typing.is_empty() {
+                None
+            } else {
+                Some(typing)
+            };
+        }
+    }
+
+    /// Stop typing without changing the search.
+    pub fn cancel_search(&mut self) {
+        self.typing = None;
+    }
+
+    /// The line above the table saying what is being shown.
+    pub fn status_line(&self) -> String {
+        let mut parts = vec![format!("sort: {}", sort_label(self.sort))];
+        if let Some(filter) = self.filter {
+            parts.push(format!("filter: {}", filter.label()));
+        }
+        match (&self.typing, &self.search) {
+            (Some(typing), _) => parts.push(format!("/{typing}_")),
+            (None, Some(search)) => parts.push(format!("/{search}")),
+            (None, None) => {}
+        }
+        parts.join("  ")
     }
 
     /// The latest published sample. The lock is held for the length of the
@@ -44,9 +143,17 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// The rows the table shows, after sorting.
+    /// The rows the table shows: narrowed by the filter and the search, then
+    /// ordered. The collection keeps running underneath; only the view changes.
     pub fn rows(&self) -> Vec<ProcessSample> {
         let mut processes = self.snapshot().processes.clone();
+        if let Some(filter) = self.filter {
+            processes.retain(|process| uses(process, filter));
+        }
+        if let Some(search) = &self.search {
+            let needle = search.to_lowercase();
+            processes.retain(|process| process.name.to_lowercase().contains(&needle));
+        }
         crate::view::sort_processes(&mut processes, self.sort);
         processes
     }
@@ -98,6 +205,7 @@ impl App {
                 .style(style)
             })
             .collect();
+        let title = format!(" Processes ({}) | {} ", processes.len(), self.status_line());
         let table = Table::new(
             rows,
             [
@@ -110,12 +218,29 @@ impl App {
         )
         .header(header)
         .row_highlight_style(Style::default().fg(Color::Yellow))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" Processes ({}) ", processes.len())),
-        );
+        .block(Block::default().borders(Borders::ALL).title(title));
         frame.render_widget(table, area);
+    }
+}
+
+/// Whether a process is using the resource the table is narrowed to.
+fn uses(process: &ProcessSample, resource: Resource) -> bool {
+    match resource {
+        Resource::Cpu => process.cpu_percent > 0.0,
+        Resource::Memory => process.mem_rss_bytes > 0,
+        Resource::Io => crate::view::io_bytes(process) > 0,
+        Resource::Network => crate::view::net_bytes(process) > 0,
+    }
+}
+
+/// The name of a sort order.
+pub fn sort_label(sort: Sort) -> &'static str {
+    match sort {
+        Sort::Cpu => "cpu",
+        Sort::Mem => "memory",
+        Sort::Name => "name",
+        Sort::Io => "i/o",
+        Sort::Net => "network",
     }
 }
 
