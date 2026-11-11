@@ -19,9 +19,10 @@ use crate::collect::proc::ProcCollector;
 use crate::config::Config;
 use crate::sample::Sampler;
 
+use crate::policy::PolicyAction;
 use crate::view::Sort;
 
-use app::{ActionKind, App, Menu};
+use app::{App, Menu};
 
 /// Run the dashboard until the user quits.
 pub fn run(config: Config) -> Result<(), String> {
@@ -149,12 +150,12 @@ fn on_menu_key(app: &mut App, key: KeyEvent) {
             }
         },
         _ => match key.code {
-            KeyCode::Char('1') => app.choose(ActionKind::Kill),
-            KeyCode::Char('2') => app.choose(ActionKind::Suspend),
-            KeyCode::Char('3') => app.choose(ActionKind::Resume),
-            KeyCode::Char('4') => app.choose(ActionKind::Renice),
+            KeyCode::Char('1') => app.choose(PolicyAction::Kill),
+            KeyCode::Char('2') => app.choose(PolicyAction::Suspend),
+            KeyCode::Char('3') => app.choose(PolicyAction::Resume),
+            KeyCode::Char('4') => app.choose(PolicyAction::Renice),
             KeyCode::Char('d') => {
-                app.choose(ActionKind::Kill);
+                app.choose(PolicyAction::Kill);
                 app.perform(true);
                 app.close_menu();
             }

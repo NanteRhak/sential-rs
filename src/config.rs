@@ -5,9 +5,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::core::Severity;
+use crate::policy::PolicyAction;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -315,31 +316,6 @@ impl Default for Policy {
             require_confirmation: false,
             exclude: Vec::new(),
             allow_protected: false,
-        }
-    }
-}
-
-/// What a policy can do.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PolicyAction {
-    #[default]
-    Kill,
-    Suspend,
-    Resume,
-    Renice,
-    Throttle,
-}
-
-impl PolicyAction {
-    /// The name of the action, as it is shown.
-    pub fn label(&self) -> &'static str {
-        match self {
-            PolicyAction::Kill => "kill",
-            PolicyAction::Suspend => "suspend",
-            PolicyAction::Resume => "resume",
-            PolicyAction::Renice => "renice",
-            PolicyAction::Throttle => "throttle",
         }
     }
 }

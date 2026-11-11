@@ -3,11 +3,55 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-pub use crate::config::PolicyAction as ActionKind;
+/// What an action does to a process.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PolicyAction {
+    #[default]
+    Kill,
+    Suspend,
+    Resume,
+    Renice,
+    Throttle,
+}
 
-use crate::config::{Policy, PolicyAction};
+impl PolicyAction {
+    /// The name of the action, as it is shown.
+    pub fn label(&self) -> &'static str {
+        match self {
+            PolicyAction::Kill => "kill",
+            PolicyAction::Suspend => "suspend",
+            PolicyAction::Resume => "resume",
+            PolicyAction::Renice => "renice",
+            PolicyAction::Throttle => "throttle",
+        }
+    }
+
+    /// What the action does, in words.
+    pub fn detail(&self) -> &'static str {
+        match self {
+            PolicyAction::Kill => "send SIGTERM",
+            PolicyAction::Suspend => "stop the process",
+            PolicyAction::Resume => "continue the process",
+            PolicyAction::Renice => "change the priority",
+            PolicyAction::Throttle => "slow the process down",
+        }
+    }
+
+    /// The signal the action sends, if it sends one.
+    pub fn signal(&self) -> Option<i32> {
+        match self {
+            PolicyAction::Kill => Some(libc::SIGTERM),
+            PolicyAction::Suspend => Some(libc::SIGSTOP),
+            PolicyAction::Resume => Some(libc::SIGCONT),
+            PolicyAction::Renice | PolicyAction::Throttle => None,
+        }
+    }
+}
+
+use crate::config::Policy;
 use crate::core::metrics::SystemSample;
 use crate::core::process::ProcessSample;
 
@@ -135,7 +179,7 @@ fn match_process(
 mod tests {
     use super::*;
     use crate::config::Condition;
-    use crate::config::PolicyAction as ConfigAction;
+
     use std::time::Duration;
 
     fn policy(name: &str, enabled: bool) -> Policy {
@@ -146,7 +190,7 @@ mod tests {
             condition: Condition::Above,
             threshold: 50.0,
             duration: Duration::from_secs(0),
-            action: ConfigAction::Kill,
+            action: PolicyAction::Kill,
             cooldown: Duration::from_secs(60),
             require_confirmation: false,
             exclude: Vec::new(),

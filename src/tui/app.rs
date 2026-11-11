@@ -13,47 +13,9 @@ use crate::config::Config;
 use crate::core::format::bytes_to_human;
 use crate::core::metrics::SystemSample;
 use crate::core::process::ProcessSample;
+use crate::policy::PolicyAction;
 use crate::sample::{SamplerState, Shared};
 use crate::view::Sort;
-
-/// What the action menu can do to the selected process.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActionKind {
-    Kill,
-    Suspend,
-    Resume,
-    Renice,
-}
-
-impl ActionKind {
-    pub fn label(&self) -> &'static str {
-        match self {
-            ActionKind::Kill => "kill",
-            ActionKind::Suspend => "suspend",
-            ActionKind::Resume => "resume",
-            ActionKind::Renice => "renice",
-        }
-    }
-
-    pub fn detail(&self) -> &'static str {
-        match self {
-            ActionKind::Kill => "send SIGTERM",
-            ActionKind::Suspend => "stop the process",
-            ActionKind::Resume => "continue the process",
-            ActionKind::Renice => "change the priority",
-        }
-    }
-
-    /// The signal the action sends, if it sends one.
-    pub fn signal(&self) -> Option<i32> {
-        match self {
-            ActionKind::Kill => Some(libc::SIGTERM),
-            ActionKind::Suspend => Some(libc::SIGSTOP),
-            ActionKind::Resume => Some(libc::SIGCONT),
-            ActionKind::Renice => None,
-        }
-    }
-}
 
 /// What the action menu is showing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,9 +23,9 @@ pub enum Menu {
     /// The list of actions.
     Open,
     /// Waiting for the new priority.
-    Value(ActionKind),
+    Value(PolicyAction),
     /// Waiting for the user to say yes.
-    Confirm(ActionKind, Option<i32>),
+    Confirm(PolicyAction, Option<i32>),
 }
 
 /// The resource the table is narrowed to.
@@ -153,15 +115,15 @@ impl App {
     }
 
     /// Choose an action from the menu.
-    pub fn choose(&mut self, action: ActionKind) {
+    pub fn choose(&mut self, action: PolicyAction) {
         self.menu = Some(match action {
-            ActionKind::Renice => Menu::Value(action),
+            PolicyAction::Renice => Menu::Value(action),
             other => Menu::Confirm(other, None),
         });
     }
 
     /// The action the menu is waiting to confirm.
-    pub fn pending_action(&self) -> Option<(ActionKind, Option<i32>)> {
+    pub fn pending_action(&self) -> Option<(PolicyAction, Option<i32>)> {
         match &self.menu {
             Some(Menu::Confirm(action, value)) => Some((*action, *value)),
             _ => None,
@@ -207,7 +169,7 @@ impl App {
         }
 
         let result = match action {
-            ActionKind::Renice => match value {
+            PolicyAction::Renice => match value {
                 Some(value) => {
                     action::renice(pid, value).map(|()| format!("priority set to {value}"))
                 }
@@ -468,10 +430,10 @@ impl App {
         match self.menu {
             Some(Menu::Open) => {
                 for (index, action) in [
-                    ActionKind::Kill,
-                    ActionKind::Suspend,
-                    ActionKind::Resume,
-                    ActionKind::Renice,
+                    PolicyAction::Kill,
+                    PolicyAction::Suspend,
+                    PolicyAction::Resume,
+                    PolicyAction::Renice,
                 ]
                 .into_iter()
                 .enumerate()
@@ -970,7 +932,7 @@ mod tests {
         };
         let mut app = App::with_processes(vec![process]);
         app.open_menu();
-        app.choose(ActionKind::Kill);
+        app.choose(PolicyAction::Kill);
 
         let text = render(&app, 120, 40);
 
@@ -998,7 +960,7 @@ mod tests {
         };
         let mut app = App::with_processes(vec![process]).with_config(config);
         app.open_menu();
-        app.choose(ActionKind::Kill);
+        app.choose(PolicyAction::Kill);
         app.perform(true);
 
         let records = crate::action::read_records(&log);

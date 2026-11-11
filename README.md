@@ -2,7 +2,8 @@
 
 A lightweight, fast system monitor for Linux, written in Rust — htop's view of the machine, plus anomaly detection and safe resource control.
 
-**Status: no code yet.** The design and the build plan are done; the implementation starts at ticket 01.
+**Status: implemented.** The tool builds, the tests pass, and every ticket in
+the plan has landed.
 
 ## Why
 
@@ -13,7 +14,7 @@ A lightweight, fast system monitor for Linux, written in Rust — htop's view of
 - Some anomalies last milliseconds and slip past normal monitoring.
 - On weak hardware, resources have to be rationed and critical processes protected.
 
-## What it will do
+## What it does
 
 - **System health** — CPU (total, per core, user/system/iowait/idle), load average, memory, swap, disk throughput and filesystem usage, network throughput and packet rate, temperature and sensors, kernel pressure stalls.
 - **Process view** — CPU%, RSS/VSZ, per-process disk I/O, thread and file-descriptor counts, state, user, cgroup. Sortable by any resource and by a combined resource pressure score.
@@ -22,20 +23,27 @@ A lightweight, fast system monitor for Linux, written in Rust — htop's view of
 - **Resource control** — kill, signal, suspend, resume, renice, I/O priority, CPU affinity and cgroup limits. Dry-run by default, confirmation on destructive actions, protected processes never auto-killed, every action audited.
 - **Interfaces** — a CLI for scripting, a TUI for watching, and a daemon mode for running unattended.
 
-## Planned commands
+## Commands
 
 | Command | Purpose |
 | --- | --- |
 | `sentinel health` | One-screen system health summary |
 | `sentinel ps --sort cpu` | Process list, sortable by any resource |
+| `sentinel ps --json` | The same list, for scripting |
 | `sentinel top` | Busiest processes once, then exit |
 | `sentinel tui` | Live dashboard with graphs and a process detail panel |
 | `sentinel watch --interval 100ms` | High-frequency watch for short-lived spikes |
 | `sentinel alerts --last 1h` | Recent alerts |
 | `sentinel inspect <pid>` | Everything known about one process |
 | `sentinel kill <pid>` | Safe, confirmed termination |
+| `sentinel suspend <pid>` / `sentinel resume <pid>` | Stop and continue a process |
+| `sentinel renice <pid> 5` | Change a process priority |
+| `sentinel limit <pid> --cpu 50` | Cap what a process may use, with a cgroup |
 | `sentinel report --last 10m` | What happened in the recent past |
 | `sentinel daemon` | Run in the background |
+
+Every action that touches a process asks first, unless `--yes` is given, and
+`--dry-run` reports what would happen without doing it.
 
 ## Design constraints
 
@@ -65,7 +73,51 @@ disk_usage_percent = 90
 
 [critical_processes]
 names = ["systemd", "sshd", "init"]
+
+[actions]
+log_file = "~/.local/state/sentinel/actions.log"
+
+[[alerts.rules]]
+name = "high-cpu"
+metric = "cpu_percent"
+condition = "above"
+threshold = 90
+duration = "5s"
+severity = "warning"
+message = "CPU has been busy for five seconds"
+
+[[policies.rules]]
+name = "kill-hog"
+enabled = false
+metric = "process_cpu_percent"
+condition = "above"
+threshold = 95
+duration = "30s"
+action = "kill"
+cooldown = "10m"
+exclude = ["sshd"]
 ```
+
+A rule may also be a spike, measured against a moving baseline:
+
+```toml
+[[alerts.rules]]
+name = "cpu-spike"
+metric = "cpu_percent"
+condition = "spike"
+severity = "warning"
+message = "CPU spiked"
+
+[alerts.rules.spike]
+baseline = "moving-average"   # or "ewma"
+window = "30s"
+multiple = 3.0
+minimum = 50.0
+```
+
+The other sections are `[ui]`, `[sampling]`, `[thresholds]`, `[detection]`,
+`[pressure]` (the weights of the pressure score), `[history]` (how much
+history is kept on disk) and `[daemon]` (where the daemon logs).
 
 On weak hardware, set `profile = "low-resource"` (or `low_resource_mode = true`). It
 forces an interval of at least 2 seconds, caps history at one minute, disables
@@ -140,16 +192,16 @@ nothing at all unless it is told to.
 
 ## Building
 
-The Cargo project is created in ticket 01. Once it lands:
-
 ```bash
 cargo build --release
 cargo test
 cargo run -- --help
 ```
 
+`make lint` runs the formatter check and clippy; `make test` runs the tests.
+
 ## Documentation
 
 - [Full specification](project/project-specs1.md) — the source of truth for scope and behaviour.
 - [Problem statement](project/problem.md) and [project notes](project/about.md).
-- [Implementation tickets](.scratch/system-sentinel/issues/) — 32 tracer-bullet tickets, numbered in dependency order.
+- [Implementation tickets](.scratch/system-sentinel/issues/) — the 32 tracer-bullet tickets, numbered in dependency order, all landed.

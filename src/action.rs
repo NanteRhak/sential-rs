@@ -130,25 +130,25 @@ impl Executor {
         }
 
         record.result = match proposal.action {
-            crate::config::PolicyAction::Kill => match send_signal(proposal.pid, libc::SIGTERM) {
+            crate::policy::PolicyAction::Kill => match send_signal(proposal.pid, libc::SIGTERM) {
                 Ok(()) => "sent SIGTERM".to_string(),
                 Err(error) => format!("failed: {error}"),
             },
-            crate::config::PolicyAction::Suspend => {
+            crate::policy::PolicyAction::Suspend => {
                 match send_signal(proposal.pid, libc::SIGSTOP) {
                     Ok(()) => "sent SIGSTOP".to_string(),
                     Err(error) => format!("failed: {error}"),
                 }
             }
-            crate::config::PolicyAction::Resume => match send_signal(proposal.pid, libc::SIGCONT) {
+            crate::policy::PolicyAction::Resume => match send_signal(proposal.pid, libc::SIGCONT) {
                 Ok(()) => "sent SIGCONT".to_string(),
                 Err(error) => format!("failed: {error}"),
             },
-            crate::config::PolicyAction::Renice => match renice(proposal.pid, 5) {
+            crate::policy::PolicyAction::Renice => match renice(proposal.pid, 5) {
                 Ok(()) => "priority set to 5".to_string(),
                 Err(error) => format!("failed: {error}"),
             },
-            crate::config::PolicyAction::Throttle => "not supported on this platform".to_string(),
+            crate::policy::PolicyAction::Throttle => "not supported on this platform".to_string(),
         };
         self.write(&record);
         record.result.clone()
@@ -269,7 +269,7 @@ mod tests {
             policy: "kill-hog".into(),
             pid,
             process_name: name.into(),
-            action: crate::config::PolicyAction::Kill,
+            action: crate::policy::PolicyAction::Kill,
             reason: "the policy matched".into(),
             current_value: 90.0,
             allow_protected: false,
