@@ -452,9 +452,8 @@ cargo run --example dashboard   # render the dashboard as text
 ```
 
 The work is tracked as 32 tracer-bullet tickets in
-[`.scratch/system-sentinel/issues/`](.scratch/system-sentinel/issues/), and the
-original specification is in
-[`project/project-specs1.md`](project/project-specs1.md).
+[`.scratch/system-sentinel/issues/`](.scratch/system-sentinel/issues/), one
+commit per ticket.
 
 ## Known limits
 
