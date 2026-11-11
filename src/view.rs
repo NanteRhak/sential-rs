@@ -310,6 +310,18 @@ pub fn exit_line(exit: &crate::exits::ExitRecord) -> String {
     )
 }
 
+/// A proposed action, as it is shown.
+pub fn proposal_line(proposal: &crate::policy::Proposal) -> String {
+    format!(
+        "{} would {} {} ({}): {}",
+        proposal.policy,
+        proposal.action.label(),
+        proposal.process_name,
+        proposal.pid,
+        proposal.reason
+    )
+}
+
 /// One line of the watch view.
 pub fn watch_line(sample: &SystemSample) -> String {
     let memory = &sample.memory;

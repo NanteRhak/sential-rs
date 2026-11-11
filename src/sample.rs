@@ -16,6 +16,7 @@ use crate::core::metrics::SystemSample;
 use crate::core::process::ProcessSample;
 use crate::exits::{ExitRecord, ExitTracker, RestartLoop};
 use crate::history::{CAPACITY, Ring};
+use crate::policy::{PolicyEngine, Proposal};
 
 /// The latest published state. Cloning is cheap: it holds no locks.
 #[derive(Debug, Clone, Default)]
@@ -29,6 +30,8 @@ pub struct SamplerState {
     pub exits: Vec<ExitRecord>,
     /// The processes that keep coming back.
     pub restart_loops: Vec<RestartLoop>,
+    /// The actions the policies would take.
+    pub proposals: Vec<Proposal>,
 }
 
 /// What happens when an alert is raised.
@@ -96,6 +99,7 @@ pub struct Sampler {
     on_alert: Option<AlertSink>,
     tracker: ExitTracker,
     weights: crate::pressure::Weights,
+    policies: Option<PolicyEngine>,
 }
 
 impl Sampler {
@@ -113,7 +117,14 @@ impl Sampler {
             on_alert: None,
             tracker: ExitTracker::new(),
             weights: crate::pressure::Weights::default(),
+            policies: None,
         }
+    }
+
+    /// Watch the policies and propose what they would do.
+    pub fn with_policies(mut self, engine: PolicyEngine) -> Self {
+        self.policies = Some(engine);
+        self
     }
 
     /// How much each resource counts towards the pressure score.
@@ -222,6 +233,10 @@ impl Sampler {
         exits.extend(self.tracker.observe(&processes));
         exits.truncate(50);
         let restart_loops = self.tracker.restart_loops();
+        let proposals = match self.policies.as_mut() {
+            Some(engine) => engine.propose(&system, &processes, Instant::now()),
+            None => Vec::new(),
+        };
         let state = Arc::new(SamplerState {
             tick: self.state().tick + 1,
             system,
@@ -229,6 +244,7 @@ impl Sampler {
             alerts,
             exits,
             restart_loops,
+            proposals,
         });
         self.shared.publish(state.clone(), self.history_duration);
         state

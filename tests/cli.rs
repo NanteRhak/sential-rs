@@ -411,6 +411,29 @@ fn ps_shows_the_pressure_score_and_can_sort_by_it() {
 }
 
 #[test]
+fn a_policy_proposes_an_action_without_taking_it() {
+    let dir = std::env::temp_dir().join(format!("sentinel-policy-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sentinel.toml"),
+        "[policies]\ndry_run = true\n\n[[policies.rules]]\nname = \"kill-hog\"\nenabled = true\nmetric = \"process_cpu_percent\"\ncondition = \"above\"\nthreshold = 0.0\naction = \"kill\"\ncooldown = \"10m\"\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .args(["watch", "--interval", "100ms", "--duration", "500ms"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("[policy]"), "stdout: {stdout}");
+    assert!(stdout.contains("would kill"), "stdout: {stdout}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

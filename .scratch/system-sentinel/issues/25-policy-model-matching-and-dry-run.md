@@ -4,10 +4,10 @@
 
 **Blocked by:** 14: Threshold alert rules and terminal emission.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Policies are read from config: name, condition, action, cooldown, confirmation requirement and excluded process names
-- [ ] A policy matches an alert or a metric condition and resolves to a proposed action
-- [ ] Every policy is disabled by default and never fires unless explicitly enabled
-- [ ] Running with dry-run enabled lists the actions that would have been taken, with the reason, and takes none of them
-- [ ] A test asserts a disabled policy never matches and an enabled dry-run policy proposes an action without performing it
+- [x] Policies are read from config: name, condition, action, cooldown, confirmation requirement and excluded process names
+- [x] A policy matches an alert or a metric condition and resolves to a proposed action
+- [x] Every policy is disabled by default and never fires unless explicitly enabled
+- [x] Running with dry-run enabled lists the actions that would have been taken, with the reason, and takes none of them
+- [x] A test asserts a disabled policy never matches and an enabled dry-run policy proposes an action without performing it

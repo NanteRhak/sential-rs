@@ -107,7 +107,10 @@ pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
             config.detection.restart_window,
             config.detection.oom_evidence,
         )
-        .with_pressure(config.pressure.weights());
+        .with_pressure(config.pressure.weights())
+        .with_policies(crate::policy::PolicyEngine::new(
+            config.policies.rules.clone(),
+        ));
     if !config.alerts.enabled || config.alerts.rules.is_empty() {
         return sampler;
     }
@@ -331,6 +334,9 @@ fn watch(config: Config, interval: Option<String>, duration: Option<String>) -> 
             println!("[exit] {}", view::exit_line(exit));
         }
         seen_exits.set(state.exits.len());
+        for proposal in &state.proposals {
+            println!("[policy] {}", view::proposal_line(proposal));
+        }
     });
     Ok(())
 }

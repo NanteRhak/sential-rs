@@ -264,6 +264,7 @@ impl App {
             alerts: Vec::new(),
             exits: Vec::new(),
             restart_loops: Vec::new(),
+            proposals: Vec::new(),
         };
         App::new(Arc::new(Shared::default())).with_state(state)
     }
@@ -280,6 +281,7 @@ impl App {
                 alerts,
                 exits: Vec::new(),
                 restart_loops: Vec::new(),
+                proposals: Vec::new(),
             }),
             std::time::Duration::from_secs(600),
         );
@@ -299,6 +301,7 @@ impl App {
                     alerts: Vec::new(),
                     exits: Vec::new(),
                     restart_loops: Vec::new(),
+                    proposals: Vec::new(),
                 }),
                 std::time::Duration::from_secs(600),
             );

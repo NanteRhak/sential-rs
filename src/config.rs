@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::core::Severity;
 
@@ -20,6 +20,7 @@ pub struct Config {
     pub actions: Actions,
     pub detection: Detection,
     pub pressure: Pressure,
+    pub policies: Policies,
     pub critical_processes: CriticalProcesses,
 }
 
@@ -235,6 +236,81 @@ impl Condition {
             Condition::Above => value > threshold,
             Condition::Below => value < threshold,
             Condition::Spike => false,
+        }
+    }
+}
+
+/// The policies that decide what to do about a problem.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Policies {
+    /// When true the actions are only listed, never taken.
+    pub dry_run: bool,
+    pub rules: Vec<Policy>,
+}
+
+/// A rule that matches a condition and proposes an action.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Policy {
+    pub name: String,
+    /// A policy does nothing unless it is turned on.
+    pub enabled: bool,
+    /// The metric to watch, for example `process_cpu_percent`.
+    pub metric: String,
+    pub condition: Condition,
+    pub threshold: f64,
+    /// How long the condition must hold before the policy acts.
+    #[serde(deserialize_with = "de_duration")]
+    pub duration: Duration,
+    pub action: PolicyAction,
+    /// How long the policy stays quiet after it has acted.
+    #[serde(deserialize_with = "de_duration")]
+    pub cooldown: Duration,
+    /// Whether the user has to agree before the action is taken.
+    pub require_confirmation: bool,
+    /// Processes this policy never touches.
+    pub exclude: Vec<String>,
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            enabled: false,
+            metric: String::new(),
+            condition: Condition::Above,
+            threshold: 0.0,
+            duration: Duration::from_secs(0),
+            action: PolicyAction::Kill,
+            cooldown: Duration::from_secs(300),
+            require_confirmation: false,
+            exclude: Vec::new(),
+        }
+    }
+}
+
+/// What a policy can do.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PolicyAction {
+    #[default]
+    Kill,
+    Suspend,
+    Resume,
+    Renice,
+    Throttle,
+}
+
+impl PolicyAction {
+    /// The name of the action, as it is shown.
+    pub fn label(&self) -> &'static str {
+        match self {
+            PolicyAction::Kill => "kill",
+            PolicyAction::Suspend => "suspend",
+            PolicyAction::Resume => "resume",
+            PolicyAction::Renice => "renice",
+            PolicyAction::Throttle => "throttle",
         }
     }
 }
@@ -742,6 +818,38 @@ mod tests {
 
         assert_eq!(c.alerts.rules[1].condition, Condition::Below);
         assert!(!c.alerts.rules[1].enabled);
+    }
+
+    #[test]
+    fn policies_are_read() {
+        let c = Config::from_toml(
+            "[policies]\ndry_run = true\n\n[[policies.rules]]\nname = \"kill-hog\"\nenabled = true\nmetric = \"process_cpu_percent\"\ncondition = \"above\"\nthreshold = 90.0\nduration = \"30s\"\naction = \"kill\"\ncooldown = \"10m\"\nrequire_confirmation = true\nexclude = [\"sshd\"]\n",
+        )
+        .unwrap();
+
+        assert!(c.policies.dry_run);
+        assert_eq!(c.policies.rules.len(), 1);
+        let rule = &c.policies.rules[0];
+        assert_eq!(rule.name, "kill-hog");
+        assert!(rule.enabled);
+        assert_eq!(rule.metric, "process_cpu_percent");
+        assert_eq!(rule.threshold, 90.0);
+        assert_eq!(rule.duration, Duration::from_secs(30));
+        assert_eq!(rule.action, PolicyAction::Kill);
+        assert_eq!(rule.cooldown, Duration::from_secs(600));
+        assert!(rule.require_confirmation);
+        assert_eq!(rule.exclude, ["sshd"]);
+    }
+
+    #[test]
+    fn a_policy_is_off_until_it_is_turned_on() {
+        let c = Config::from_toml(
+            "[[policies.rules]]\nname = \"kill-hog\"\nmetric = \"process_cpu_percent\"\n",
+        )
+        .unwrap();
+
+        assert!(!c.policies.rules[0].enabled);
+        assert!(!c.policies.dry_run);
     }
 
     #[test]
