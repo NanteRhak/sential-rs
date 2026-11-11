@@ -20,6 +20,7 @@ pub struct Config {
     pub actions: Actions,
     pub detection: Detection,
     pub history: History,
+    pub daemon: Daemon,
     pub pressure: Pressure,
     pub policies: Policies,
     pub critical_processes: CriticalProcesses,
@@ -241,6 +242,14 @@ impl Condition {
     }
 }
 
+/// Where the daemon writes what it is doing.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Daemon {
+    /// Where the daemon log is written. `None` means standard output.
+    pub log_file: Option<PathBuf>,
+}
+
 /// How much history is kept on disk.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -430,6 +439,7 @@ impl Config {
         config.general.data_dir = expand_home(config.general.data_dir);
         config.alerts.log_file = expand_home(config.alerts.log_file);
         config.actions.log_file = expand_home(config.actions.log_file);
+        config.daemon.log_file = expand_home(config.daemon.log_file);
         config.apply_profile();
         config.validate()?;
         Ok(config)

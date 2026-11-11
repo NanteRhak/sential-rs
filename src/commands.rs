@@ -38,7 +38,10 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
             dry_run,
         } => renice(config, pid, value, yes, dry_run),
         Command::Report { last, json } => report(config, last, json),
-        Command::Daemon => Err("daemon is not implemented yet".into()),
+        Command::Daemon {
+            duration,
+            background,
+        } => daemon(config, duration, background),
     }
 }
 
@@ -365,6 +368,96 @@ fn describe_interval(interval: Duration) -> String {
     } else {
         format!("{:.1}s", interval.as_secs_f64())
     }
+}
+
+/// Run in the background, collecting and watching.
+fn daemon(config: Config, duration: Option<String>, background: bool) -> Result<(), String> {
+    let limit = match duration {
+        Some(text) => Some(parse_duration(&text).map_err(|error| format!("--duration: {error}"))?),
+        None => None,
+    };
+    if background {
+        detach()?;
+    }
+    crate::interrupt::install();
+    // The daemon should survive the terminal that started it going away.
+    crate::interrupt::ignore_hangup();
+
+    let interval = config.general.interval;
+    let mut sampler = sampler(&config, interval).with_executor(crate::action::Executor::new(
+        config.critical_processes.names.clone(),
+        config.actions.log_file.clone(),
+        config.policies.dry_run,
+    ));
+
+    println!(
+        "sentinel daemon: sampling every {}",
+        describe_interval(interval)
+    );
+
+    let deadline = limit.map(|limit| std::time::Instant::now() + limit);
+    let stop = || {
+        crate::interrupt::requested()
+            || deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline)
+    };
+    sampler.run_with(&stop, &|state| {
+        let memory = &state.system.memory;
+        let memory_percent = if memory.total_bytes == 0 {
+            0.0
+        } else {
+            memory.used_bytes as f64 / memory.total_bytes as f64 * 100.0
+        };
+        let line = format!(
+            "tick {} cpu {:.1}% mem {:.1}% processes {}",
+            state.tick,
+            state.system.cpu.total_percent,
+            memory_percent,
+            state.processes.len()
+        );
+        println!("{line}");
+        if let Some(path) = &config.daemon.log_file {
+            let _ = crate::action::write_record(
+                path,
+                &crate::action::ActionRecord {
+                    timestamp: crate::collect::now_millis(),
+                    action: "daemon".into(),
+                    pid: 0,
+                    process_name: "sentinel".into(),
+                    reason: line.clone(),
+                    user_requested: false,
+                    result: "running".into(),
+                },
+            );
+        }
+    });
+    sampler.flush_history();
+    println!("sentinel daemon: stopped");
+    Ok(())
+}
+
+/// Detach from the terminal and carry on without it.
+fn detach() -> Result<(), String> {
+    unsafe {
+        let pid = libc::fork();
+        if pid < 0 {
+            return Err("cannot detach from the terminal".into());
+        }
+        if pid > 0 {
+            libc::_exit(0);
+        }
+        libc::setsid();
+        let null = std::ffi::CString::new("/dev/null").unwrap();
+        let fd = libc::open(null.as_ptr(), libc::O_RDWR);
+        if fd >= 0 {
+            libc::dup2(fd, 0);
+            libc::dup2(fd, 1);
+            libc::dup2(fd, 2);
+            if fd > 2 {
+                libc::close(fd);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Summarise what happened over a window.

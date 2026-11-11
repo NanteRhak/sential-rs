@@ -13,6 +13,13 @@ pub fn install() {
     }
 }
 
+/// Keep going when the terminal that started the tool goes away.
+pub fn ignore_hangup() {
+    unsafe {
+        libc::signal(libc::SIGHUP, libc::SIG_IGN);
+    }
+}
+
 /// Whether the user asked the tool to stop.
 pub fn requested() -> bool {
     REQUESTED.load(Ordering::SeqCst)

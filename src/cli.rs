@@ -129,5 +129,12 @@ pub enum Command {
         json: bool,
     },
     /// Run in the background
-    Daemon,
+    Daemon {
+        /// How long to run for before stopping
+        #[arg(long, value_name = "DURATION")]
+        duration: Option<String>,
+        /// Detach from the terminal and run on its own
+        #[arg(long)]
+        background: bool,
+    },
 }

@@ -4,10 +4,10 @@
 
 **Blocked by:** 15: Alert cooldown, log file and `sentinel alerts`; 26: Automatic actions and protected processes; 28: Disk persistence with retention limits.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `sentinel daemon` runs in the background, collecting metrics, detecting anomalies, storing history, emitting alerts and applying policies
-- [ ] It logs to the configured destination and runs until asked to stop, shutting down cleanly on a stop signal
-- [ ] It keeps running when the terminal that started it goes away
-- [ ] Its resource use stays within the stated lightweight budget, and that budget is documented
-- [ ] A test starts the daemon, lets it run briefly, and asserts it produced samples and stayed alive
+- [x] `sentinel daemon` runs in the background, collecting metrics, detecting anomalies, storing history, emitting alerts and applying policies
+- [x] It logs to the configured destination and runs until asked to stop, shutting down cleanly on a stop signal
+- [x] It keeps running when the terminal that started it goes away
+- [x] Its resource use stays within the stated lightweight budget, and that budget is documented
+- [x] A test starts the daemon, lets it run briefly, and asserts it produced samples and stayed alive

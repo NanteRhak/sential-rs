@@ -515,6 +515,31 @@ fn history_is_kept_on_disk_and_the_report_reads_it_back() {
 }
 
 #[test]
+fn the_daemon_runs_and_collects_samples() {
+    let dir = std::env::temp_dir().join(format!("sentinel-daemon-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sentinel.toml"),
+        "[general]\npersist_history = true\ndata_dir = \"data\"\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .args(["daemon", "--duration", "1s"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    let history = std::fs::read_to_string(dir.join("data/history.jsonl")).unwrap_or_default();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("sentinel daemon"), "stdout: {stdout}");
+    assert!(stdout.contains("tick"), "stdout: {stdout}");
+    assert!(!history.is_empty(), "the daemon collected no samples");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

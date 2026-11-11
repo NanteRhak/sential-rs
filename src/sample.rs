@@ -221,19 +221,22 @@ impl Sampler {
         };
         self.last_error = None;
         let system = sample_between(&reading, self.previous.as_ref());
-        let processes = match self.previous.as_ref() {
-            Some(before) => {
-                let elapsed = reading.at.duration_since(before.at).as_secs_f64();
-                process::process_samples(
-                    &reading.processes,
-                    &before.processes,
-                    reading.uptime_secs,
-                    reading.memory.total_bytes,
-                    elapsed,
-                )
-            }
-            None => Vec::new(),
+        // The first tick has nothing to difference against, so the rates are
+        // zero; the processes are still listed.
+        let (before, elapsed) = match self.previous.as_ref() {
+            Some(before) => (
+                before.processes.as_slice(),
+                reading.at.duration_since(before.at).as_secs_f64(),
+            ),
+            None => (&[][..], 0.0),
         };
+        let processes = process::process_samples(
+            &reading.processes,
+            before,
+            reading.uptime_secs,
+            reading.memory.total_bytes,
+            elapsed,
+        );
         self.previous = Some(reading);
 
         let mut alerts = self.state().alerts.clone();

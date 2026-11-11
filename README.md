@@ -73,6 +73,26 @@ persistence, and turns off the per-process I/O and network collectors.
 
 An invalid config is refused at startup with the offending key and line number.
 
+## Daemon mode
+
+`sentinel daemon` collects metrics, watches the alert rules, stores the
+history, writes the alerts and applies the policies in the background. It
+runs until it is asked to stop, and shuts down cleanly on Ctrl-C or
+`SIGTERM`. `--background` detaches it from the terminal, so it keeps going
+when the terminal goes away.
+
+Its resource budget is small on purpose:
+
+| Budget | Default | Low-resource profile |
+| --- | --- | --- |
+| Sampling interval | 1 second | 2 seconds |
+| CPU used | under 2% of one core | under 1% of one core |
+| Memory used | under 30 MiB | under 20 MiB |
+| Disk used | 10 MiB of history, then trimmed | none |
+
+The low-resource profile turns the persistence off, so the daemon writes
+nothing at all unless it is told to.
+
 ## Building
 
 The Cargo project is created in ticket 01. Once it lands:
