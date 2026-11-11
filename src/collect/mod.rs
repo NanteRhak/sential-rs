@@ -6,6 +6,7 @@
 
 pub mod filesystem;
 pub mod proc;
+pub mod sensors;
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -27,6 +28,7 @@ pub struct RawSnapshot {
     pub pressure: Option<PressureCounters>,
     pub filesystems: Vec<filesystem::FilesystemCounters>,
     pub notes: Vec<String>,
+    pub sensors: sensors::SensorReadings,
 }
 
 impl Default for RawSnapshot {
@@ -41,6 +43,7 @@ impl Default for RawSnapshot {
             pressure: None,
             filesystems: Vec::new(),
             notes: Vec::new(),
+            sensors: sensors::SensorReadings::default(),
         }
     }
 }
@@ -235,6 +238,35 @@ pub fn sample_between(current: &RawSnapshot, previous: Option<&RawSnapshot>) -> 
         })
         .collect();
     sample.disk.notes = current.notes.clone();
+
+    sample.sensors.temperatures = current
+        .sensors
+        .temperatures
+        .iter()
+        .map(|(label, celsius)| crate::core::metrics::TemperatureSample {
+            label: label.clone(),
+            celsius: *celsius,
+        })
+        .collect();
+    sample.sensors.fans = current
+        .sensors
+        .fans
+        .iter()
+        .map(|(label, rpm)| crate::core::metrics::FanSample {
+            label: label.clone(),
+            rpm: *rpm,
+        })
+        .collect();
+    sample.sensors.throttled = current.sensors.throttled;
+    sample.sensors.power_profile = current.sensors.power_profile.clone();
+    sample.sensors.pressure =
+        current
+            .pressure
+            .map(|pressure| crate::core::metrics::PressureSample {
+                cpu_some_avg10: pressure.cpu_some,
+                memory_some_avg10: pressure.memory_some,
+                io_some_avg10: pressure.io_some,
+            });
     let mut network = crate::core::metrics::NetworkSample::default();
     for (name, now) in &current.network {
         let Some(before) = previous.network.get(name) else {

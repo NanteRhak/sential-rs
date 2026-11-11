@@ -6,7 +6,7 @@ use crate::core::metrics::SystemSample;
 const LABEL: usize = 18;
 
 /// The `sentinel health` screen.
-pub fn health(sample: &SystemSample, show_network: bool) -> String {
+pub fn health(sample: &SystemSample, show_network: bool, show_temperature: bool) -> String {
     let mut out = String::new();
     out.push_str("CPU\n");
     out.push_str(&row(
@@ -71,6 +71,60 @@ pub fn health(sample: &SystemSample, show_network: bool) -> String {
     if show_network {
         out.push('\n');
         out.push_str(&network_section(sample));
+    }
+    if show_temperature {
+        out.push('\n');
+        out.push_str(&sensor_section(sample));
+    }
+    out
+}
+
+/// The hardware-health row: temperatures, fans, throttling and pressure.
+fn sensor_section(sample: &SystemSample) -> String {
+    let sensors = &sample.sensors;
+    let mut out = String::new();
+    out.push_str("Sensors\n");
+    if sensors.temperatures.is_empty() {
+        out.push_str(&row("Temperature", "no readable sensors"));
+    } else {
+        let readings = sensors
+            .temperatures
+            .iter()
+            .map(|reading| format!("{} {:.1}°C", reading.label, reading.celsius))
+            .collect::<Vec<_>>()
+            .join("  ");
+        out.push_str(&row("Temperature", &readings));
+    }
+    if sensors.fans.is_empty() {
+        out.push_str(&row("Fans", "no readable sensors"));
+    } else {
+        let readings = sensors
+            .fans
+            .iter()
+            .map(|reading| format!("{} {} rpm", reading.label, reading.rpm))
+            .collect::<Vec<_>>()
+            .join("  ");
+        out.push_str(&row("Fans", &readings));
+    }
+    out.push_str(&row(
+        "Throttling",
+        match sensors.throttled {
+            Some(true) => "yes, the processor is throttled",
+            Some(false) => "no",
+            None => "not reported",
+        },
+    ));
+    if let Some(profile) = &sensors.power_profile {
+        out.push_str(&row("Power profile", profile));
+    }
+    if let Some(pressure) = &sensors.pressure {
+        out.push_str(&row(
+            "Pressure stall",
+            &format!(
+                "cpu {:.1}%  memory {:.1}%  io {:.1}%",
+                pressure.cpu_some_avg10, pressure.memory_some_avg10, pressure.io_some_avg10
+            ),
+        ));
     }
     out
 }
@@ -239,7 +293,7 @@ mod tests {
             ..Default::default()
         };
 
-        let text = health(&sample, true);
+        let text = health(&sample, true, true);
 
         assert!(text.contains("CPU"), "{text}");
         assert!(text.contains("Memory"), "{text}");
@@ -279,7 +333,7 @@ mod tests {
             ..Default::default()
         };
 
-        let text = health(&sample, true);
+        let text = health(&sample, true, true);
 
         assert!(text.contains("Disk"), "{text}");
         assert!(text.contains("Throughput"), "{text}");
@@ -313,7 +367,7 @@ mod tests {
             ..Default::default()
         };
 
-        let text = health(&sample, true);
+        let text = health(&sample, true, true);
 
         assert!(text.contains("Network"), "{text}");
         assert!(text.contains("Throughput"), "{text}");
@@ -325,14 +379,23 @@ mod tests {
 
     #[test]
     fn the_network_row_can_be_left_out() {
-        let text = health(&SystemSample::default(), false);
+        let text = health(&SystemSample::default(), false, true);
 
         assert!(!text.contains("Network"), "{text}");
     }
 
     #[test]
+    fn a_machine_with_no_sensors_says_so_instead_of_failing() {
+        let text = health(&SystemSample::default(), true, true);
+
+        assert!(text.contains("Sensors"), "{text}");
+        assert!(text.contains("no readable sensors"), "{text}");
+        assert!(text.contains("not reported"), "{text}");
+    }
+
+    #[test]
     fn a_machine_with_no_cores_says_so() {
-        let text = health(&SystemSample::default(), true);
+        let text = health(&SystemSample::default(), true, true);
 
         assert!(text.contains("no cores reported"), "{text}");
     }

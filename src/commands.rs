@@ -35,7 +35,14 @@ fn health(config: Config, interval: Option<String>, loopback: bool) -> Result<()
     if let Some(error) = sampler.last_error() {
         return Err(format!("cannot read system metrics: {error}"));
     }
-    print!("{}", view::health(&state.system, config.ui.show_network));
+    print!(
+        "{}",
+        view::health(
+            &state.system,
+            config.ui.show_network,
+            config.ui.show_temperature,
+        )
+    );
     Ok(())
 }
 

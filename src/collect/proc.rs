@@ -321,6 +321,7 @@ pub fn parse_pressure(text: &str) -> Option<PressureCounters> {
 /// Reads the whole machine at every tick.
 pub struct ProcCollector {
     fs: ProcFs,
+    sys: super::sensors::SysFs,
     include_loopback: bool,
 }
 
@@ -334,8 +335,15 @@ impl ProcCollector {
     pub fn new(fs: ProcFs, include_loopback: bool) -> Self {
         Self {
             fs,
+            sys: super::sensors::SysFs::system(),
             include_loopback,
         }
+    }
+
+    /// Read the sensors from somewhere other than the real `/sys`.
+    pub fn with_sys(mut self, sys: super::sensors::SysFs) -> Self {
+        self.sys = sys;
+        self
     }
 }
 
@@ -354,6 +362,7 @@ impl super::Collector for ProcCollector {
             pressure: self.fs.pressure(),
             filesystems,
             notes,
+            sensors: self.sys.readings(),
         })
     }
 }
