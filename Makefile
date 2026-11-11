@@ -43,7 +43,7 @@ package: release
 	install -Dm755 target/$(RELEASE)/sentinel $(BUILD)/sentinel-$(VERSION)/sentinel
 	install -Dm644 packaging/systemd/sentinel.service $(BUILD)/sentinel-$(VERSION)/sentinel.service
 	install -Dm644 README.md $(BUILD)/sentinel-$(VERSION)/README.md
-	cp LICENSE $(BUILD)/sentinel-$(VERSION)/LICENSE 2>/dev/null || true
+	install -Dm644 LICENSE.md $(BUILD)/sentinel-$(VERSION)/LICENSE
 	tar -C $(BUILD) -czf $(BUILD)/sentinel-$(VERSION).tar.gz sentinel-$(VERSION)
 	@echo "built $(BUILD)/sentinel-$(VERSION).tar.gz"
 

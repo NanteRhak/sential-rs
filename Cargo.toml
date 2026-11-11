@@ -2,6 +2,13 @@
 name = "sentinel"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "A lightweight Linux system monitor with anomaly detection and safe resource control"
+license = "MIT"
+repository = "https://github.com/NanteRhak/sential-rs"
+readme = "README.md"
+keywords = ["linux", "monitoring", "system-monitor", "tui", "observability"]
+categories = ["command-line-utilities", "os::linux-apis", "visualization"]
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
