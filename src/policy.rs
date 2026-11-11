@@ -20,6 +20,8 @@ pub struct Proposal {
     pub action: PolicyAction,
     pub reason: String,
     pub current_value: f64,
+    /// Whether the policy may act on a protected process.
+    pub allow_protected: bool,
 }
 
 /// Matches the policies against the machine.
@@ -83,6 +85,7 @@ impl PolicyEngine {
                     process.name, policy.metric, policy.threshold
                 ),
                 current_value: value,
+                allow_protected: policy.allow_protected,
             });
         }
         proposals
@@ -147,6 +150,7 @@ mod tests {
             cooldown: Duration::from_secs(60),
             require_confirmation: false,
             exclude: Vec::new(),
+            allow_protected: false,
         }
     }
 

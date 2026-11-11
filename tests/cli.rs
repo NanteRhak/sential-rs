@@ -434,6 +434,28 @@ fn a_policy_proposes_an_action_without_taking_it() {
 }
 
 #[test]
+fn protected_processes_are_marked_in_the_process_list() {
+    let dir = std::env::temp_dir().join(format!("sentinel-mark-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sentinel.toml"),
+        "[critical_processes]\nnames = [\"sleep\"]\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .arg("ps")
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("sleep *"), "output: {stdout}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

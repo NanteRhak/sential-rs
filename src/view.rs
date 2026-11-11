@@ -431,7 +431,10 @@ pub fn processes_json(processes: &[ProcessSample]) -> String {
 }
 
 /// The `sentinel ps` table.
-pub fn processes(processes: &[ProcessSample]) -> String {
+///
+/// A protected process is marked with a star, so it is obvious that the tool
+/// will not touch it.
+pub fn processes(processes: &[ProcessSample], protected: &[String]) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "{:>7}  {:>7}  {:<10}  {:<5}  {:>6}  {:>9}  {:>10}  {:>10}  {:>6}  {:>6}  {}\n",
@@ -450,10 +453,19 @@ pub fn processes(processes: &[ProcessSample]) -> String {
             bytes_to_human(process.mem_vsz_bytes),
             process.mem_percent,
             process.pressure_score,
-            process.name,
+            marked_name(process, protected),
         ));
     }
     out
+}
+
+/// The name of a process, marked when it is protected.
+fn marked_name(process: &ProcessSample, protected: &[String]) -> String {
+    if crate::action::protection(&process.name, protected).is_some() {
+        format!("{} *", process.name)
+    } else {
+        process.name.clone()
+    }
 }
 
 /// How long a process has been running, in the units a person expects.
@@ -639,7 +651,7 @@ mod tests {
             ..Default::default()
         };
 
-        let text = processes(&[sample]);
+        let text = processes(&[sample], &[]);
 
         assert!(text.contains("PID"), "{text}");
         assert!(text.contains("MEM%"), "{text}");

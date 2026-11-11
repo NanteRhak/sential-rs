@@ -581,7 +581,7 @@ impl App {
                     Cell::from(process.user.clone()),
                     Cell::from(format!("{:.1}", process.cpu_percent)),
                     Cell::from(format!("{:.1}", process.mem_percent)),
-                    Cell::from(process.name.clone()),
+                    Cell::from(marked_name(process, &self.config.critical_processes.names)),
                 ])
                 .style(style)
             })
@@ -721,6 +721,15 @@ pub fn network_series(history: &[Arc<SamplerState>]) -> Vec<u64> {
         .iter()
         .map(|state| state.system.network.rx_bytes_per_sec + state.system.network.tx_bytes_per_sec)
         .collect()
+}
+
+/// The name of a process, marked when it is protected.
+fn marked_name(process: &ProcessSample, protected: &[String]) -> String {
+    if crate::action::protection(&process.name, protected).is_some() {
+        format!("{} *", process.name)
+    } else {
+        process.name.clone()
+    }
 }
 
 /// Whether a process is using the resource the table is narrowed to.

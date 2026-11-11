@@ -100,6 +100,7 @@ pub struct Sampler {
     tracker: ExitTracker,
     weights: crate::pressure::Weights,
     policies: Option<PolicyEngine>,
+    executor: Option<crate::action::Executor>,
 }
 
 impl Sampler {
@@ -118,7 +119,14 @@ impl Sampler {
             tracker: ExitTracker::new(),
             weights: crate::pressure::Weights::default(),
             policies: None,
+            executor: None,
         }
+    }
+
+    /// Perform the actions the policies propose.
+    pub fn with_executor(mut self, executor: crate::action::Executor) -> Self {
+        self.executor = Some(executor);
+        self
     }
 
     /// Watch the policies and propose what they would do.
@@ -237,6 +245,11 @@ impl Sampler {
             Some(engine) => engine.propose(&system, &processes, Instant::now()),
             None => Vec::new(),
         };
+        if let Some(executor) = &self.executor {
+            for proposal in &proposals {
+                executor.perform(proposal, proposal.allow_protected);
+            }
+        }
         let state = Arc::new(SamplerState {
             tick: self.state().tick + 1,
             system,

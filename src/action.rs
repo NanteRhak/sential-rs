@@ -80,6 +80,91 @@ pub fn read_records(path: &Path) -> Vec<ActionRecord> {
         .collect()
 }
 
+/// Performs the actions a policy proposes.
+pub struct Executor {
+    protected: Vec<String>,
+    log_file: Option<PathBuf>,
+    dry_run: bool,
+}
+
+impl Executor {
+    pub fn new(protected: Vec<String>, log_file: Option<PathBuf>, dry_run: bool) -> Self {
+        Self {
+            protected,
+            log_file,
+            dry_run,
+        }
+    }
+
+    /// Whether the process is protected from being touched.
+    pub fn protection(&self, name: &str) -> Option<String> {
+        protection(name, &self.protected)
+    }
+
+    /// Do what the proposal says, and write down what happened.
+    ///
+    /// A protected process is not terminated unless the policy says it may be.
+    pub fn perform(&self, proposal: &crate::policy::Proposal, allow_protected: bool) -> String {
+        let mut record = ActionRecord {
+            timestamp: crate::collect::now_millis(),
+            action: proposal.action.label().to_string(),
+            pid: proposal.pid,
+            process_name: proposal.process_name.clone(),
+            reason: format!("policy {}", proposal.policy),
+            user_requested: false,
+            result: String::new(),
+        };
+
+        if let Some(rule) = self.protection(&proposal.process_name)
+            && !allow_protected
+        {
+            record.result = format!("refused: protected by the {rule} rule");
+            self.write(&record);
+            return record.result.clone();
+        }
+
+        if self.dry_run {
+            record.result = "dry run: nothing was done".to_string();
+            self.write(&record);
+            return record.result.clone();
+        }
+
+        record.result = match proposal.action {
+            crate::config::PolicyAction::Kill => match send_signal(proposal.pid, libc::SIGTERM) {
+                Ok(()) => "sent SIGTERM".to_string(),
+                Err(error) => format!("failed: {error}"),
+            },
+            crate::config::PolicyAction::Suspend => {
+                match send_signal(proposal.pid, libc::SIGSTOP) {
+                    Ok(()) => "sent SIGSTOP".to_string(),
+                    Err(error) => format!("failed: {error}"),
+                }
+            }
+            crate::config::PolicyAction::Resume => match send_signal(proposal.pid, libc::SIGCONT) {
+                Ok(()) => "sent SIGCONT".to_string(),
+                Err(error) => format!("failed: {error}"),
+            },
+            crate::config::PolicyAction::Renice => match renice(proposal.pid, 5) {
+                Ok(()) => "priority set to 5".to_string(),
+                Err(error) => format!("failed: {error}"),
+            },
+            crate::config::PolicyAction::Throttle => "not supported on this platform".to_string(),
+        };
+        self.write(&record);
+        record.result.clone()
+    }
+
+    /// Write an action to the action log.
+    fn write(&self, record: &ActionRecord) {
+        let Some(path) = &self.log_file else {
+            return;
+        };
+        if let Err(error) = write_record(path, record) {
+            eprintln!("sentinel: {error}");
+        }
+    }
+}
+
 /// The signals that can be sent by name.
 pub const SIGNALS: [(&str, i32); 10] = [
     ("HUP", libc::SIGHUP),
@@ -177,6 +262,74 @@ mod tests {
         assert_eq!(records[0].pid, 42);
         assert_eq!(records[0].action, "kill");
         assert!(records[0].user_requested);
+    }
+
+    fn proposal(name: &str, pid: u32) -> crate::policy::Proposal {
+        crate::policy::Proposal {
+            policy: "kill-hog".into(),
+            pid,
+            process_name: name.into(),
+            action: crate::config::PolicyAction::Kill,
+            reason: "the policy matched".into(),
+            current_value: 90.0,
+            allow_protected: false,
+        }
+    }
+
+    #[test]
+    fn an_automatic_policy_refuses_a_protected_process() {
+        let executor = Executor::new(vec!["sshd".into()], None, false);
+
+        let result = executor.perform(&proposal("sshd", 1), false);
+
+        assert!(result.contains("refused"), "{result}");
+        assert!(result.contains("sshd"), "{result}");
+    }
+
+    #[test]
+    fn an_automatic_policy_may_act_on_an_unprotected_process() {
+        let executor = Executor::new(vec!["sshd".into()], None, false);
+
+        // The process is one we cannot signal in the test, but the policy is
+        // allowed to try: the refusal must not be about protection.
+        let result = executor.perform(&proposal("sleep", 999_999), false);
+
+        assert!(!result.contains("refused: protected"), "{result}");
+    }
+
+    #[test]
+    fn a_policy_that_is_allowed_may_act_on_a_protected_process() {
+        let executor = Executor::new(vec!["sshd".into()], None, false);
+
+        let result = executor.perform(&proposal("sshd", 999_999), true);
+
+        assert!(!result.contains("refused: protected"), "{result}");
+    }
+
+    #[test]
+    fn a_dry_run_does_nothing() {
+        let executor = Executor::new(Vec::new(), None, true);
+
+        let result = executor.perform(&proposal("sleep", 999_999), false);
+
+        assert!(result.contains("dry run"), "{result}");
+    }
+
+    #[test]
+    fn an_automatic_action_is_written_to_the_action_log() {
+        let path = std::env::temp_dir().join(format!("sentinel-auto-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let executor = Executor::new(Vec::new(), Some(path.clone()), true);
+
+        executor.perform(&proposal("backup", 42), false);
+        let records = read_records(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action, "kill");
+        assert_eq!(records[0].pid, 42);
+        assert!(records[0].reason.contains("kill-hog"), "{:?}", records[0]);
+        assert!(!records[0].user_requested);
     }
 
     #[test]

@@ -271,6 +271,8 @@ pub struct Policy {
     pub require_confirmation: bool,
     /// Processes this policy never touches.
     pub exclude: Vec<String>,
+    /// Whether the policy may act on a protected process.
+    pub allow_protected: bool,
 }
 
 impl Default for Policy {
@@ -286,6 +288,7 @@ impl Default for Policy {
             cooldown: Duration::from_secs(300),
             require_confirmation: false,
             exclude: Vec::new(),
+            allow_protected: false,
         }
     }
 }

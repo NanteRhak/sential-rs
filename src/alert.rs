@@ -601,6 +601,31 @@ mod tests {
     }
 
     #[test]
+    fn a_protected_process_that_is_using_too_much_still_raises_an_alert() {
+        let mut rule = rule("proc", 50.0, Duration::from_secs(1));
+        rule.metric = "process_cpu_percent".to_string();
+        let mut engine = AlertEngine::new(vec![rule]);
+        let processes = vec![ProcessSample {
+            pid: 42,
+            name: "sshd".into(),
+            cpu_percent: 80.0,
+            state: ProcessState::Running,
+            ..Default::default()
+        }];
+
+        let start = Instant::now();
+        let _ = engine.evaluate(&SystemSample::default(), &processes, start);
+        let raised = engine.evaluate(
+            &SystemSample::default(),
+            &processes,
+            start + Duration::from_secs(2),
+        );
+
+        assert_eq!(raised.len(), 1);
+        assert_eq!(raised[0].process_name.as_deref(), Some("sshd"));
+    }
+
+    #[test]
     fn an_unknown_metric_never_fires() {
         let mut unknown = rule("odd", 1.0, Duration::from_secs(1));
         unknown.metric = "purple".to_string();
