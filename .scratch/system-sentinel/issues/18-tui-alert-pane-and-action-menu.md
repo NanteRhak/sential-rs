@@ -4,10 +4,10 @@
 
 **Blocked by:** 13: TUI: process detail panel; 15: Alert cooldown, log file and `sentinel alerts`; 17: Manual signals, suspend, resume and renice.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The TUI has a pane listing recent alerts with their severity, and it fills as alerts are raised
-- [ ] The action menu offers kill, suspend, resume and renice for the selected process
-- [ ] The action menu asks for confirmation before a destructive action and offers a dry-run preview
-- [ ] Actions taken from the TUI are written to the same action log as CLI actions
-- [ ] A test asserts the action menu lists the available actions for a selected process
+- [x] The TUI has a pane listing recent alerts with their severity, and it fills as alerts are raised
+- [x] The action menu offers kill, suspend, resume and renice for the selected process
+- [x] The action menu asks for confirmation before a destructive action and offers a dry-run preview
+- [x] Actions taken from the TUI are written to the same action log as CLI actions
+- [x] A test asserts the action menu lists the available actions for a selected process

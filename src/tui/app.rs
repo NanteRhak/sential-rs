@@ -8,11 +8,63 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Sparkline, Table};
 
+use crate::action;
+use crate::config::Config;
 use crate::core::format::bytes_to_human;
 use crate::core::metrics::SystemSample;
 use crate::core::process::ProcessSample;
 use crate::sample::{SamplerState, Shared};
 use crate::view::Sort;
+
+/// What the action menu can do to the selected process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionKind {
+    Kill,
+    Suspend,
+    Resume,
+    Renice,
+}
+
+impl ActionKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ActionKind::Kill => "kill",
+            ActionKind::Suspend => "suspend",
+            ActionKind::Resume => "resume",
+            ActionKind::Renice => "renice",
+        }
+    }
+
+    pub fn detail(&self) -> &'static str {
+        match self {
+            ActionKind::Kill => "send SIGTERM",
+            ActionKind::Suspend => "stop the process",
+            ActionKind::Resume => "continue the process",
+            ActionKind::Renice => "change the priority",
+        }
+    }
+
+    /// The signal the action sends, if it sends one.
+    pub fn signal(&self) -> Option<i32> {
+        match self {
+            ActionKind::Kill => Some(libc::SIGTERM),
+            ActionKind::Suspend => Some(libc::SIGSTOP),
+            ActionKind::Resume => Some(libc::SIGCONT),
+            ActionKind::Renice => None,
+        }
+    }
+}
+
+/// What the action menu is showing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Menu {
+    /// The list of actions.
+    Open,
+    /// Waiting for the new priority.
+    Value(ActionKind),
+    /// Waiting for the user to say yes.
+    Confirm(ActionKind, Option<i32>),
+}
 
 /// The resource the table is narrowed to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +102,12 @@ pub struct App {
     pub typing: Option<String>,
     /// Whether the detail panel is open.
     pub detail: bool,
+    /// The action menu, when it is open.
+    pub menu: Option<Menu>,
+    /// The configuration the actions follow.
+    pub config: Config,
+    /// The number being typed in the menu.
+    value: String,
 }
 
 impl App {
@@ -64,10 +122,139 @@ impl App {
             search: None,
             typing: None,
             detail: false,
+            menu: None,
+            config: Config::default(),
+            value: String::new(),
+        }
+    }
+
+    /// The number being typed in the menu.
+    pub fn value_text(&self) -> &str {
+        &self.value
+    }
+
+    /// Add a digit to the number being typed.
+    pub fn push_value(&mut self, character: char) {
+        self.value.push(character);
+    }
+
+    pub fn clear_value(&mut self) {
+        self.value.clear();
+    }
+
+    /// Open the action menu for the selected process.
+    pub fn open_menu(&mut self) {
+        self.menu = Some(Menu::Open);
+    }
+
+    /// Close the action menu.
+    pub fn close_menu(&mut self) {
+        self.menu = None;
+    }
+
+    /// Choose an action from the menu.
+    pub fn choose(&mut self, action: ActionKind) {
+        self.menu = Some(match action {
+            ActionKind::Renice => Menu::Value(action),
+            other => Menu::Confirm(other, None),
+        });
+    }
+
+    /// The action the menu is waiting to confirm.
+    pub fn pending_action(&self) -> Option<(ActionKind, Option<i32>)> {
+        match &self.menu {
+            Some(Menu::Confirm(action, value)) => Some((*action, *value)),
+            _ => None,
+        }
+    }
+
+    /// Do the action the menu has chosen.
+    ///
+    /// A dry run reports what would happen and changes nothing.
+    pub fn perform(&mut self, dry_run: bool) {
+        let Some((action, value)) = self.pending_action() else {
+            return;
+        };
+        let Some(process) = self.selected_process() else {
+            self.status = "no process is selected".to_string();
+            return;
+        };
+        let pid = process.pid;
+        let name = process.name.clone();
+
+        if let Some(rule) = action::protection(&name, &self.config.critical_processes.names) {
+            self.status = format!("{name} is protected by the critical_processes rule ({rule})");
+            self.record(
+                "kill",
+                pid,
+                &name,
+                "tui",
+                &format!("refused: protected by {rule}"),
+            );
+            return;
+        }
+
+        if dry_run {
+            self.status = format!("would {} {name} ({pid})", action.label());
+            self.record(
+                action.label(),
+                pid,
+                &name,
+                "tui",
+                "dry run: nothing was sent",
+            );
+            return;
+        }
+
+        let result = match action {
+            ActionKind::Renice => match value {
+                Some(value) => {
+                    action::renice(pid, value).map(|()| format!("priority set to {value}"))
+                }
+                None => Err("no priority was given".to_string()),
+            },
+            other => match other.signal() {
+                Some(signal) => action::send_signal(pid, signal)
+                    .map(|()| format!("sent {}", action::signal_name(signal))),
+                None => Err("that action sends no signal".to_string()),
+            },
+        };
+        match result {
+            Ok(outcome) => self.status = format!("{} {name} ({pid}): {outcome}", action.label()),
+            Err(error) => {
+                self.status = format!("{} {name} ({pid}) failed: {error}", action.label())
+            }
+        }
+        self.record(action.label(), pid, &name, "tui", &self.status.clone());
+    }
+
+    /// Write an action to the action log, the same log the CLI writes to.
+    fn record(&mut self, action: &str, pid: u32, process_name: &str, reason: &str, result: &str) {
+        let Some(path) = &self.config.actions.log_file else {
+            return;
+        };
+        let record = action::ActionRecord {
+            timestamp: crate::collect::now_millis(),
+            action: action.to_string(),
+            pid,
+            process_name: process_name.to_string(),
+            reason: reason.to_string(),
+            user_requested: true,
+            result: result.to_string(),
+        };
+        if let Err(error) = action::write_record(path, &record) {
+            self.status = format!("could not write the action log: {error}");
         }
     }
 
     /// An app showing a known set of processes, for tests.
+    /// An app with a configuration, for tests.
+    #[cfg(test)]
+    pub fn with_config(mut self, config: Config) -> App {
+        self.config = config;
+        self
+    }
+
     #[cfg(test)]
     pub fn with_processes(processes: Vec<ProcessSample>) -> App {
         let state = SamplerState {
@@ -77,6 +264,22 @@ impl App {
             alerts: Vec::new(),
         };
         App::new(Arc::new(Shared::default())).with_state(state)
+    }
+
+    /// An app showing a known set of alerts, for tests.
+    #[cfg(test)]
+    pub fn with_alerts(alerts: Vec<crate::alert::Alert>) -> App {
+        let shared = Arc::new(Shared::default());
+        shared.publish(
+            Arc::new(SamplerState {
+                tick: 1,
+                system: SystemSample::default(),
+                processes: Vec::new(),
+                alerts,
+            }),
+            std::time::Duration::from_secs(600),
+        );
+        App::new(shared)
     }
 
     /// An app showing a known set of samples, for tests.
@@ -193,13 +396,99 @@ impl App {
         let area = frame.area();
         let panes = Layout::vertical([
             Constraint::Length(8),
+            Constraint::Length(4),
             Constraint::Length(8),
             Constraint::Min(4),
         ])
         .split(area);
         self.draw_summary(frame, panes[0]);
-        self.draw_graphs(frame, panes[1]);
-        self.draw_processes(frame, panes[2]);
+        self.draw_alerts(frame, panes[1]);
+        self.draw_graphs(frame, panes[2]);
+        self.draw_processes(frame, panes[3]);
+    }
+
+    /// The recent alerts, with their severity.
+    fn draw_alerts(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default().borders(Borders::ALL).title(" Alerts ");
+        let alerts = &self.snapshot().alerts;
+        if alerts.is_empty() {
+            frame.render_widget(Paragraph::new("no alerts").block(block), area);
+            return;
+        }
+        let lines: Vec<Line> = alerts
+            .iter()
+            .rev()
+            .take(2)
+            .map(|alert| {
+                let colour = match alert.severity {
+                    crate::core::Severity::Info => Color::Blue,
+                    crate::core::Severity::Warning => Color::Yellow,
+                    crate::core::Severity::Critical => Color::Red,
+                };
+                Line::from(vec![
+                    Span::styled(
+                        format!("[{:?}] ", alert.severity).to_uppercase(),
+                        Style::default().fg(colour),
+                    ),
+                    Span::raw(alert.message.clone()),
+                ])
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(lines).block(block), area);
+    }
+
+    /// The action menu for the selected process.
+    fn draw_menu(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default().borders(Borders::ALL).title(" Actions ");
+        let Some(process) = self.selected_process() else {
+            frame.render_widget(Paragraph::new("no process selected").block(block), area);
+            return;
+        };
+        let mut lines = vec![Line::from(format!(
+            "for {} ({})",
+            process.name, process.pid
+        ))];
+        match self.menu {
+            Some(Menu::Open) => {
+                for (index, action) in [
+                    ActionKind::Kill,
+                    ActionKind::Suspend,
+                    ActionKind::Resume,
+                    ActionKind::Renice,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    lines.push(Line::from(format!(
+                        " {}. {:<8} {}",
+                        index + 1,
+                        action.label(),
+                        action.detail()
+                    )));
+                }
+                lines.push(Line::from(" d: dry run   esc: close"));
+            }
+            Some(Menu::Value(action)) => {
+                lines.push(Line::from(format!(
+                    "new priority for {}: type a number and press enter",
+                    action.label()
+                )));
+            }
+            Some(Menu::Confirm(action, value)) => {
+                lines.push(Line::from(format!(
+                    "{} {} ({})?",
+                    action.label(),
+                    process.name,
+                    process.pid
+                )));
+                if let Some(value) = value {
+                    lines.push(Line::from(format!("new priority: {value}")));
+                }
+                lines.push(Line::from(" y: do it   d: dry run   n: cancel"));
+            }
+            None => {}
+        }
+        frame.render_widget(Paragraph::new(lines).block(block), area);
     }
 
     /// The usage graphs, drawn from the recent history.
@@ -245,7 +534,7 @@ impl App {
     }
 
     fn draw_processes(&self, frame: &mut Frame, area: Rect) {
-        let (table_area, detail_area) = if self.detail {
+        let (table_area, side_area) = if self.detail || self.menu.is_some() {
             let halves =
                 Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
                     .split(area);
@@ -295,8 +584,12 @@ impl App {
         .row_highlight_style(Style::default().fg(Color::Yellow))
         .block(Block::default().borders(Borders::ALL).title(title));
         frame.render_widget(table, table_area);
-        if let Some(detail_area) = detail_area {
-            self.draw_detail(frame, detail_area);
+        if let Some(side_area) = side_area {
+            if self.menu.is_some() {
+                self.draw_menu(frame, side_area);
+            } else {
+                self.draw_detail(frame, side_area);
+            }
         }
     }
 
@@ -594,6 +887,100 @@ mod tests {
         let text = render(&app, 120, 40);
 
         assert!(text.contains("not readable"), "{text}");
+    }
+
+    #[test]
+    fn the_alert_pane_lists_the_recent_alerts_with_their_severity() {
+        let alert = crate::alert::Alert {
+            id: 1,
+            timestamp: 0,
+            severity: crate::core::Severity::Critical,
+            category: crate::alert::AlertCategory::Cpu,
+            message: "CPU has been busy".into(),
+            metric: Some("cpu_percent".into()),
+            pid: None,
+            process_name: None,
+            current_value: 95.0,
+            threshold: Some(90.0),
+            suggestion: "look around".into(),
+        };
+        let app = App::with_alerts(vec![alert]);
+
+        let text = render(&app, 120, 40);
+
+        assert!(text.contains("Alerts"), "{text}");
+        assert!(text.contains("CRITICAL"), "{text}");
+        assert!(text.contains("CPU has been busy"), "{text}");
+    }
+
+    #[test]
+    fn the_action_menu_lists_the_actions_for_the_selected_process() {
+        let process = ProcessSample {
+            pid: 42,
+            name: "backup".into(),
+            ..Default::default()
+        };
+        let mut app = App::with_processes(vec![process]);
+        app.open_menu();
+
+        let text = render(&app, 120, 40);
+
+        assert!(text.contains("Actions"), "{text}");
+        assert!(text.contains("kill"), "{text}");
+        assert!(text.contains("suspend"), "{text}");
+        assert!(text.contains("resume"), "{text}");
+        assert!(text.contains("renice"), "{text}");
+        assert!(text.contains("backup"), "{text}");
+    }
+
+    #[test]
+    fn the_action_menu_asks_before_it_acts() {
+        let process = ProcessSample {
+            pid: 42,
+            name: "backup".into(),
+            ..Default::default()
+        };
+        let mut app = App::with_processes(vec![process]);
+        app.open_menu();
+        app.choose(ActionKind::Kill);
+
+        let text = render(&app, 120, 40);
+
+        assert!(text.contains("kill backup"), "{text}");
+        assert!(text.contains("y: do it"), "{text}");
+        assert!(text.contains("d: dry run"), "{text}");
+    }
+
+    #[test]
+    fn an_action_from_the_dashboard_is_written_to_the_action_log() {
+        let dir = std::env::temp_dir().join(format!("sentinel-tui-action-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("actions.jsonl");
+        let config = Config {
+            actions: crate::config::Actions {
+                log_file: Some(log.clone()),
+                confirm: false,
+            },
+            ..Default::default()
+        };
+        let process = ProcessSample {
+            pid: 42,
+            name: "backup".into(),
+            ..Default::default()
+        };
+        let mut app = App::with_processes(vec![process]).with_config(config);
+        app.open_menu();
+        app.choose(ActionKind::Kill);
+        app.perform(true);
+
+        let records = crate::action::read_records(&log);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action, "kill");
+        assert_eq!(records[0].pid, 42);
+        assert_eq!(records[0].process_name, "backup");
+        assert!(records[0].result.contains("dry run"), "{:?}", records[0]);
     }
 
     #[test]

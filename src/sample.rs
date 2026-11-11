@@ -164,9 +164,9 @@ impl Sampler {
         };
         self.previous = Some(reading);
 
-        let mut alerts = Vec::new();
+        let mut alerts = self.state().alerts.clone();
         if let Some(engine) = self.alerts.as_mut() {
-            alerts = engine.evaluate(&system, &processes, Instant::now());
+            alerts.extend(engine.evaluate(&system, &processes, Instant::now()));
             if let Some(on_alert) = &self.on_alert {
                 for alert in &alerts {
                     on_alert(alert);
@@ -174,6 +174,7 @@ impl Sampler {
             }
         }
 
+        alerts.truncate(50);
         let state = Arc::new(SamplerState {
             tick: self.state().tick + 1,
             system,

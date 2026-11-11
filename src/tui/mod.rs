@@ -21,7 +21,7 @@ use crate::sample::Sampler;
 
 use crate::view::Sort;
 
-use app::App;
+use app::{ActionKind, App, Menu};
 
 /// Run the dashboard until the user quits.
 pub fn run(config: Config) -> Result<(), String> {
@@ -34,7 +34,9 @@ pub fn run(config: Config) -> Result<(), String> {
 
     let mut terminal = setup()?;
     let guard = TerminalGuard;
-    let result = event_loop(&mut terminal, App::new(state));
+    let mut app = App::new(state);
+    app.config = config;
+    let result = event_loop(&mut terminal, app);
     drop(guard);
     stop.store(true, Ordering::Relaxed);
     result
@@ -81,6 +83,10 @@ fn event_loop(
 
 /// What each key does.
 pub fn on_key(app: &mut App, key: KeyEvent) {
+    if app.menu.is_some() {
+        on_menu_key(app, key);
+        return;
+    }
     if app.typing.is_some() {
         match key.code {
             KeyCode::Char(character) => app.type_char(character),
@@ -106,7 +112,55 @@ pub fn on_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up => app.selected = app.selected.saturating_sub(1),
         KeyCode::Down => app.selected += 1,
         KeyCode::Enter => app.detail = !app.detail,
+        KeyCode::Char('a') => app.open_menu(),
         _ => {}
+    }
+}
+
+/// What each key does while the action menu is open.
+fn on_menu_key(app: &mut App, key: KeyEvent) {
+    match &app.menu {
+        Some(Menu::Value(_)) => match key.code {
+            KeyCode::Char(character) if character.is_ascii_digit() => {
+                app.push_value(character);
+            }
+            KeyCode::Enter => {
+                if let Some(Menu::Value(action)) = app.menu {
+                    let value = app.value_text().parse::<i32>().ok();
+                    app.clear_value();
+                    app.menu = Some(Menu::Confirm(action, value));
+                }
+            }
+            KeyCode::Esc => app.close_menu(),
+            _ => {}
+        },
+        Some(Menu::Confirm(action, value)) => match key.code {
+            KeyCode::Char('y') => {
+                app.perform(false);
+                app.close_menu();
+            }
+            KeyCode::Char('d') => {
+                app.perform(true);
+                app.close_menu();
+            }
+            KeyCode::Char('n') | KeyCode::Esc => app.close_menu(),
+            _ => {
+                let _ = (action, value);
+            }
+        },
+        _ => match key.code {
+            KeyCode::Char('1') => app.choose(ActionKind::Kill),
+            KeyCode::Char('2') => app.choose(ActionKind::Suspend),
+            KeyCode::Char('3') => app.choose(ActionKind::Resume),
+            KeyCode::Char('4') => app.choose(ActionKind::Renice),
+            KeyCode::Char('d') => {
+                app.choose(ActionKind::Kill);
+                app.perform(true);
+                app.close_menu();
+            }
+            KeyCode::Esc => app.close_menu(),
+            _ => {}
+        },
     }
 }
 
