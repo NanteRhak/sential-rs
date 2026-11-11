@@ -9,4 +9,5 @@ pub mod commands;
 pub mod config;
 pub mod core;
 pub mod sample;
+pub mod tui;
 pub mod view;

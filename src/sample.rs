@@ -48,6 +48,11 @@ impl Sampler {
         self.interval
     }
 
+    /// A handle to the published state, for readers on another thread.
+    pub fn handle(&self) -> Arc<RwLock<Arc<SamplerState>>> {
+        self.state.clone()
+    }
+
     /// The published state. Readers clone the inner `Arc` and never hold the
     /// lock while they work, so a slow reader cannot hold up collection.
     pub fn state(&self) -> Arc<SamplerState> {

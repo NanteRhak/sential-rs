@@ -14,7 +14,7 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
         Command::Health { interval, loopback } => health(config, interval, loopback),
         Command::Ps { sort, json } => ps(config, sort, json),
         Command::Top { json } => top(config, json),
-        Command::Tui => Err("tui is not implemented yet".into()),
+        Command::Tui => crate::tui::run(config),
         Command::Watch => Err("watch is not implemented yet".into()),
         Command::Alerts => Err("alerts is not implemented yet".into()),
         Command::Inspect => Err("inspect is not implemented yet".into()),
