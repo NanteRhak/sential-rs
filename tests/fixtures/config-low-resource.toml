@@ -1,0 +1,8 @@
+[general]
+profile = "low-resource"
+interval = "100ms"
+history_duration = "30m"
+persist_history = true
+
+[sampling]
+process_network = true

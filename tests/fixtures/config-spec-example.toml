@@ -1,0 +1,37 @@
+[general]
+interval = "1s"
+low_resource_mode = false
+history_duration = "10m"
+persist_history = true
+data_dir = "~/.local/share/rust-system-sentinel"
+
+[ui]
+theme = "dark"
+show_network = true
+show_temperature = true
+
+[alerts]
+enabled = true
+log_file = "~/.local/state/rust-system-sentinel/alerts.log"
+
+[sampling]
+cpu = true
+memory = true
+disk = true
+network = true
+temperature = true
+process_io = true
+process_network = false
+
+[thresholds]
+cpu_percent = 90
+memory_percent = 90
+temperature_celsius = 85
+disk_usage_percent = 90
+
+[critical_processes]
+names = [
+    "systemd",
+    "sshd",
+    "init"
+]

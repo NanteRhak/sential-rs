@@ -4,10 +4,10 @@
 
 **Blocked by:** 01: Cargo scaffold, CLI skeleton and core metric types.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The tool loads a TOML config from a well-known user path and from a local file, and falls back to built-in defaults when absent
-- [ ] Sampling toggles, sampling interval, history duration, thresholds, alert settings and protected process names are all read from config
-- [ ] A `low-resource` profile lowers the sampling interval, shortens history and disables the expensive collectors
-- [ ] An invalid config fails with a message naming the offending key instead of panicking
-- [ ] Config parsing is covered by unit tests over fixture files
+- [x] The tool loads a TOML config from a well-known user path and from a local file, and falls back to built-in defaults when absent
+- [x] Sampling toggles, sampling interval, history duration, thresholds, alert settings and protected process names are all read from config
+- [x] A `low-resource` profile lowers the sampling interval, shortens history and disables the expensive collectors
+- [x] An invalid config fails with a message naming the offending key instead of panicking
+- [x] Config parsing is covered by unit tests over fixture files
