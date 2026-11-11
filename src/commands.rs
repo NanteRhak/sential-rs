@@ -12,8 +12,8 @@ use crate::view;
 pub fn run(command: Command, config: Config) -> Result<(), String> {
     match command {
         Command::Health { interval, loopback } => health(config, interval, loopback),
-        Command::Ps => ps(config),
-        Command::Top => Err("top is not implemented yet".into()),
+        Command::Ps { sort, json } => ps(config, sort, json),
+        Command::Top { json } => top(config, json),
         Command::Tui => Err("tui is not implemented yet".into()),
         Command::Watch => Err("watch is not implemented yet".into()),
         Command::Alerts => Err("alerts is not implemented yet".into()),
@@ -46,14 +46,36 @@ fn health(config: Config, interval: Option<String>, loopback: bool) -> Result<()
     Ok(())
 }
 
-fn ps(config: Config) -> Result<(), String> {
+fn ps(config: Config, sort: crate::cli::SortKey, json: bool) -> Result<(), String> {
+    let mut processes = sample_processes(&config)?;
+    view::sort_processes(&mut processes, view::Sort::of(sort));
+    if json {
+        println!("{}", view::processes_json(&processes));
+    } else {
+        print!("{}", view::processes(&processes));
+    }
+    Ok(())
+}
+
+fn top(config: Config, json: bool) -> Result<(), String> {
+    let mut processes = sample_processes(&config)?;
+    view::sort_processes(&mut processes, view::Sort::Cpu);
+    if json {
+        println!("{}", view::processes_json(&processes));
+    } else {
+        print!("{}", view::processes(&processes));
+    }
+    Ok(())
+}
+
+/// Two readings one interval apart, so the per-process rates are meaningful.
+fn sample_processes(config: &Config) -> Result<Vec<crate::core::process::ProcessSample>, String> {
     let mut sampler = Sampler::new(config.general.interval, Box::new(ProcCollector::default()));
     let state = sampler.warm_sample();
     if let Some(error) = sampler.last_error() {
         return Err(format!("cannot read system metrics: {error}"));
     }
-    print!("{}", view::processes(&state.processes));
-    Ok(())
+    Ok(state.processes.clone())
 }
 
 /// The interval for this run: the command line wins over the configuration.

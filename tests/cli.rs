@@ -96,6 +96,29 @@ fn ps_lists_the_table_header_and_a_running_process() {
 }
 
 #[test]
+fn ps_json_output_parses() {
+    let out = sentinel(&["ps", "--json"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout).expect("ps --json is not valid JSON");
+    let rows = value["processes"].as_array().expect("no processes array");
+    assert!(!rows.is_empty(), "the process list is empty");
+    assert!(rows[0]["pid"].is_number(), "{stdout}");
+    assert!(rows[0]["name"].is_string(), "{stdout}");
+}
+
+#[test]
+fn top_prints_the_process_table_sorted_by_cpu() {
+    let out = sentinel(&["top"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(stdout.contains("CPU%"), "output: {stdout}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

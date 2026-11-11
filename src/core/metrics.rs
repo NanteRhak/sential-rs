@@ -1,6 +1,8 @@
 //! System-wide samples: one point in time across every subsystem.
 
-#[derive(Debug, Clone, Default)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct SystemSample {
     pub timestamp: u64,
     pub cpu: CpuSample,
@@ -10,7 +12,7 @@ pub struct SystemSample {
     pub sensors: SensorSample,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct CpuSample {
     pub total_percent: f64,
     pub per_core_percent: Vec<f64>,
@@ -26,7 +28,7 @@ pub struct CpuSample {
     pub interrupts_total: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct MemorySample {
     pub total_bytes: u64,
     pub used_bytes: u64,
@@ -37,7 +39,7 @@ pub struct MemorySample {
     pub swap_used_bytes: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DiskSample {
     pub read_bytes_per_sec: u64,
     pub write_bytes_per_sec: u64,
@@ -49,7 +51,7 @@ pub struct DiskSample {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DiskDeviceSample {
     pub device: String,
     pub read_bytes_per_sec: u64,
@@ -59,7 +61,7 @@ pub struct DiskDeviceSample {
     pub latency_ms: Option<f64>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct FilesystemSample {
     pub mount_point: String,
     pub used_bytes: u64,
@@ -67,7 +69,7 @@ pub struct FilesystemSample {
     pub available_bytes: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct NetworkSample {
     pub rx_bytes_per_sec: u64,
     pub tx_bytes_per_sec: u64,
@@ -78,7 +80,7 @@ pub struct NetworkSample {
     pub interfaces: Vec<InterfaceSample>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct InterfaceSample {
     pub name: String,
     pub rx_bytes_per_sec: u64,
@@ -89,7 +91,7 @@ pub struct InterfaceSample {
     pub drops_total: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct SensorSample {
     pub temperatures: Vec<TemperatureSample>,
     pub fans: Vec<FanSample>,
@@ -100,19 +102,19 @@ pub struct SensorSample {
     pub pressure: Option<PressureSample>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct TemperatureSample {
     pub label: String,
     pub celsius: f64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct FanSample {
     pub label: String,
     pub rpm: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct PressureSample {
     pub cpu_some_avg10: f64,
     pub memory_some_avg10: f64,

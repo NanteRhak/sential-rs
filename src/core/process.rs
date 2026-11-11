@@ -1,6 +1,8 @@
 //! Per-process samples.
 
-#[derive(Debug, Clone, Default)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProcessSample {
     pub timestamp: u64,
     pub pid: u32,
@@ -29,16 +31,25 @@ pub struct ProcessSample {
 }
 
 /// The one-letter process states reported by Linux.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub enum ProcessState {
+    #[serde(rename = "R")]
     Running,
+    #[serde(rename = "S")]
     Sleeping,
+    #[serde(rename = "D")]
     DiskSleep,
+    #[serde(rename = "T")]
     Stopped,
+    #[serde(rename = "t")]
     TracingStop,
+    #[serde(rename = "Z")]
     Zombie,
+    #[serde(rename = "X")]
     Dead,
+    #[serde(rename = "I")]
     Idle,
     #[default]
+    #[serde(rename = "?")]
     Unknown,
 }

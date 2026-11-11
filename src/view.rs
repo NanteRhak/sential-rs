@@ -233,20 +233,63 @@ fn disk_section(sample: &SystemSample) -> String {
     out
 }
 
+/// The column the process list is ordered by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Sort {
+    #[default]
+    Cpu,
+    Mem,
+    Name,
+}
+
+impl Sort {
+    pub fn of(key: crate::cli::SortKey) -> Sort {
+        match key {
+            crate::cli::SortKey::Cpu => Sort::Cpu,
+            crate::cli::SortKey::Mem => Sort::Mem,
+            crate::cli::SortKey::Name => Sort::Name,
+        }
+    }
+}
+
+/// Order the rows by the chosen column. Ties keep their original order.
+pub fn sort_processes(processes: &mut [ProcessSample], sort: Sort) {
+    match sort {
+        Sort::Cpu => processes.sort_by(|a, b| {
+            b.cpu_percent
+                .partial_cmp(&a.cpu_percent)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        Sort::Mem => processes.sort_by(|a, b| {
+            b.mem_rss_bytes
+                .cmp(&a.mem_rss_bytes)
+                .then_with(|| a.pid.cmp(&b.pid))
+        }),
+        Sort::Name => processes.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.pid.cmp(&b.pid))),
+    }
+}
+
+/// The process list as JSON, for scripting.
+pub fn processes_json(processes: &[ProcessSample]) -> String {
+    let value = serde_json::json!({ "processes": processes });
+    serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string())
+}
+
 /// The `sentinel ps` table.
 pub fn processes(processes: &[ProcessSample]) -> String {
     let mut out = String::new();
     out.push_str(&format!(
-        "{:>7}  {:>7}  {:<10}  {:<5}  {:>9}  {:>10}  {:>10}  {:>6}  {}\n",
-        "PID", "PPID", "USER", "STATE", "ELAPSED", "RSS", "VSZ", "MEM%", "NAME"
+        "{:>7}  {:>7}  {:<10}  {:<5}  {:>6}  {:>9}  {:>10}  {:>10}  {:>6}  {}\n",
+        "PID", "PPID", "USER", "STATE", "CPU%", "ELAPSED", "RSS", "VSZ", "MEM%", "NAME"
     ));
     for process in processes {
         out.push_str(&format!(
-            "{:>7}  {:>7}  {:<10}  {:<5}  {:>9}  {:>10}  {:>10}  {:>5.1}%  {}\n",
+            "{:>7}  {:>7}  {:<10}  {:<5}  {:>5.1}  {:>9}  {:>10}  {:>10}  {:>5.1}%  {}\n",
             process.pid,
             process.ppid,
             process.user,
             state_letter(process.state),
+            process.cpu_percent,
             uptime(process.uptime_secs),
             bytes_to_human(process.mem_rss_bytes),
             bytes_to_human(process.mem_vsz_bytes),
@@ -447,6 +490,72 @@ mod tests {
         assert!(text.contains("sleep"), "{text}");
         assert!(text.contains("1.0 MiB"), "{text}");
         assert!(text.contains("1:01:01"), "{text}");
+    }
+
+    fn sample(pid: u32, name: &str, cpu: f64, rss: u64) -> ProcessSample {
+        ProcessSample {
+            pid,
+            name: name.into(),
+            cpu_percent: cpu,
+            mem_rss_bytes: rss,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn sorting_by_memory_puts_the_biggest_first() {
+        let mut samples = vec![
+            sample(1, "a", 1.0, 100),
+            sample(2, "b", 2.0, 500),
+            sample(3, "c", 3.0, 300),
+        ];
+
+        sort_processes(&mut samples, Sort::Mem);
+
+        assert_eq!(samples.iter().map(|s| s.pid).collect::<Vec<_>>(), [2, 3, 1]);
+    }
+
+    #[test]
+    fn sorting_by_cpu_puts_the_busiest_first() {
+        let mut samples = vec![
+            sample(1, "a", 1.0, 100),
+            sample(2, "b", 5.0, 500),
+            sample(3, "c", 3.0, 300),
+        ];
+
+        sort_processes(&mut samples, Sort::Cpu);
+
+        assert_eq!(samples.iter().map(|s| s.pid).collect::<Vec<_>>(), [2, 3, 1]);
+    }
+
+    #[test]
+    fn sorting_by_name_is_alphabetical() {
+        let mut samples = vec![
+            sample(1, "zebra", 1.0, 100),
+            sample(2, "apple", 2.0, 500),
+            sample(3, "mango", 3.0, 300),
+        ];
+
+        sort_processes(&mut samples, Sort::Name);
+
+        assert_eq!(
+            samples.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["apple", "mango", "zebra"]
+        );
+    }
+
+    #[test]
+    fn the_json_output_parses() {
+        let samples = vec![sample(1, "a", 1.5, 100)];
+
+        let text = processes_json(&samples);
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+        let rows = value["processes"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["pid"], 1);
+        assert_eq!(rows[0]["name"], "a");
+        assert_eq!(rows[0]["cpu_percent"], 1.5);
     }
 
     #[test]
