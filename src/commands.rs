@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use crate::alert::AlertEngine;
 use crate::cli::Command;
 use crate::collect::proc::ProcCollector;
 use crate::config::{Config, parse_duration};
@@ -29,8 +30,13 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
 
 fn health(config: Config, interval: Option<String>, loopback: bool) -> Result<(), String> {
     let interval = resolve_interval(interval, config.general.interval)?;
-    let collector = ProcCollector::new(crate::collect::proc::ProcFs::system(), loopback);
-    let mut sampler = Sampler::new(interval, Box::new(collector));
+    let mut sampler = sampler(&config, interval);
+    if loopback {
+        sampler = sampler.with_collector(Box::new(ProcCollector::new(
+            crate::collect::proc::ProcFs::system(),
+            true,
+        )));
+    }
     let state = sampler.warm_sample();
     if let Some(error) = sampler.last_error() {
         return Err(format!("cannot read system metrics: {error}"));
@@ -77,9 +83,23 @@ fn top(config: Config, json: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// A sampler that watches the configured rules and prints the alerts it
+/// raises as they happen.
+pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
+    let sampler = Sampler::new(interval, Box::new(ProcCollector::default()))
+        .with_history(config.general.history_duration);
+    if !config.alerts.enabled || config.alerts.rules.is_empty() {
+        return sampler;
+    }
+    sampler.with_alerts(
+        AlertEngine::new(config.alerts.rules.clone()),
+        Box::new(|alert| println!("{}", view::alert_line(alert))),
+    )
+}
+
 /// Two readings one interval apart, so the per-process rates are meaningful.
 fn sample_processes(config: &Config) -> Result<Vec<crate::core::process::ProcessSample>, String> {
-    let mut sampler = Sampler::new(config.general.interval, Box::new(ProcCollector::default()));
+    let mut sampler = sampler(config, config.general.interval);
     let state = sampler.warm_sample();
     if let Some(error) = sampler.last_error() {
         return Err(format!("cannot read system metrics: {error}"));

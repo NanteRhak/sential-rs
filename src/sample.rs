@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::alert::{Alert, AlertEngine};
 use crate::collect::process;
 use crate::collect::{Collector, RawSnapshot, sample_between};
 use crate::core::metrics::SystemSample;
@@ -21,7 +22,12 @@ pub struct SamplerState {
     pub tick: u64,
     pub system: SystemSample,
     pub processes: Vec<ProcessSample>,
+    /// The alerts raised so far, oldest first.
+    pub alerts: Vec<Alert>,
 }
+
+/// What happens when an alert is raised.
+pub type AlertSink = Box<dyn Fn(&Alert) + Send>;
 
 /// The state the sampler publishes, shared with the readers.
 #[derive(Default)]
@@ -74,6 +80,8 @@ pub struct Sampler {
     deadline: Option<Instant>,
     shared: Arc<Shared>,
     last_error: Option<String>,
+    alerts: Option<AlertEngine>,
+    on_alert: Option<AlertSink>,
 }
 
 impl Sampler {
@@ -86,7 +94,22 @@ impl Sampler {
             deadline: None,
             shared: Arc::new(Shared::default()),
             last_error: None,
+            alerts: None,
+            on_alert: None,
         }
+    }
+
+    /// Collect from somewhere other than the operating system.
+    pub fn with_collector(mut self, collector: Box<dyn Collector>) -> Self {
+        self.collector = collector;
+        self
+    }
+
+    /// Watch the metrics and raise alerts when the rules call for it.
+    pub fn with_alerts(mut self, engine: AlertEngine, on_alert: AlertSink) -> Self {
+        self.alerts = Some(engine);
+        self.on_alert = Some(on_alert);
+        self
     }
 
     /// How much of the recent past to keep.
@@ -141,10 +164,21 @@ impl Sampler {
         };
         self.previous = Some(reading);
 
+        let mut alerts = Vec::new();
+        if let Some(engine) = self.alerts.as_mut() {
+            alerts = engine.evaluate(&system, &processes, Instant::now());
+            if let Some(on_alert) = &self.on_alert {
+                for alert in &alerts {
+                    on_alert(alert);
+                }
+            }
+        }
+
         let state = Arc::new(SamplerState {
             tick: self.state().tick + 1,
             system,
             processes,
+            alerts,
         });
         self.shared.publish(state.clone(), self.history_duration);
         state

@@ -291,6 +291,36 @@ pub fn net_bytes(process: &ProcessSample) -> u64 {
     process.net_rx_bytes_per_sec.unwrap_or(0) + process.net_tx_bytes_per_sec.unwrap_or(0)
 }
 
+/// An alert, as it is shown on the terminal.
+pub fn alert_line(alert: &crate::alert::Alert) -> String {
+    let severity = match alert.severity {
+        crate::core::Severity::Info => "INFO",
+        crate::core::Severity::Warning => "WARNING",
+        crate::core::Severity::Critical => "CRITICAL",
+    };
+    let value = match alert.threshold {
+        Some(threshold) => format!(
+            "{} ({:.1} vs {:.1})",
+            alert.metric.clone().unwrap_or_default(),
+            alert.current_value,
+            threshold
+        ),
+        None => format!(
+            "{} ({:.1})",
+            alert.metric.clone().unwrap_or_default(),
+            alert.current_value
+        ),
+    };
+    let process = match (&alert.process_name, alert.pid) {
+        (Some(name), Some(pid)) => format!(" [{name} {pid}]"),
+        _ => String::new(),
+    };
+    format!(
+        "[{severity}] {}{process}: {value} — {}",
+        alert.message, alert.suggestion
+    )
+}
+
 /// Everything known about one process.
 pub fn process_detail(process: &ProcessSample) -> String {
     let mut out = String::new();
@@ -640,6 +670,31 @@ mod tests {
         assert_eq!(uptime(30), "00:30");
         assert_eq!(uptime(3_661), "1:01:01");
         assert_eq!(uptime(90_061), "1d 01:01");
+    }
+
+    #[test]
+    fn an_alert_line_shows_the_severity_and_the_numbers() {
+        let alert = crate::alert::Alert {
+            id: 1,
+            timestamp: 0,
+            severity: crate::core::Severity::Critical,
+            category: crate::alert::AlertCategory::Cpu,
+            message: "CPU has been busy".into(),
+            metric: Some("cpu_percent".into()),
+            pid: Some(42),
+            process_name: Some("backup".into()),
+            current_value: 95.0,
+            threshold: Some(90.0),
+            suggestion: "look at the busiest processes".into(),
+        };
+
+        let line = alert_line(&alert);
+
+        assert!(line.contains("[CRITICAL]"), "{line}");
+        assert!(line.contains("CPU has been busy"), "{line}");
+        assert!(line.contains("backup 42"), "{line}");
+        assert!(line.contains("95.0"), "{line}");
+        assert!(line.contains("90.0"), "{line}");
     }
 
     #[test]

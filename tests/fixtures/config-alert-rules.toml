@@ -1,0 +1,18 @@
+[[alerts.rules]]
+name = "high-cpu"
+metric = "cpu_percent"
+condition = "above"
+threshold = 90.0
+duration = "5s"
+severity = "warning"
+message = "CPU has been busy for five seconds"
+
+[[alerts.rules]]
+name = "quiet-disk"
+metric = "disk_usage_percent"
+condition = "below"
+threshold = 100.0
+duration = "1m"
+severity = "info"
+message = "the disk is not full"
+enabled = false

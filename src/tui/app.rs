@@ -74,6 +74,7 @@ impl App {
             tick: 1,
             system: SystemSample::default(),
             processes,
+            alerts: Vec::new(),
         };
         App::new(Arc::new(Shared::default())).with_state(state)
     }
@@ -88,6 +89,7 @@ impl App {
                     tick: index as u64,
                     system,
                     processes: Vec::new(),
+                    alerts: Vec::new(),
                 }),
                 std::time::Duration::from_secs(600),
             );

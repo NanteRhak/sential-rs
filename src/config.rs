@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+use crate::core::Severity;
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -123,6 +125,8 @@ pub struct Alerts {
     pub enabled: bool,
     /// `None` means no alert log.
     pub log_file: Option<PathBuf>,
+    /// The rules that watch the metrics and raise alerts.
+    pub rules: Vec<AlertRule>,
 }
 
 impl Default for Alerts {
@@ -130,6 +134,59 @@ impl Default for Alerts {
         Self {
             enabled: true,
             log_file: None,
+            rules: Vec::new(),
+        }
+    }
+}
+
+/// A rule that watches one metric and raises an alert when it stays past its
+/// threshold for long enough.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AlertRule {
+    pub name: String,
+    /// The metric to watch, for example `cpu_percent`.
+    pub metric: String,
+    pub condition: Condition,
+    pub threshold: f64,
+    /// How long the condition must hold before the alert is raised.
+    #[serde(deserialize_with = "de_duration")]
+    pub duration: Duration,
+    pub severity: Severity,
+    pub message: String,
+    pub enabled: bool,
+}
+
+impl Default for AlertRule {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            metric: String::new(),
+            condition: Condition::Above,
+            threshold: 0.0,
+            duration: Duration::from_secs(0),
+            severity: Severity::Warning,
+            message: String::new(),
+            enabled: true,
+        }
+    }
+}
+
+/// Which side of the threshold counts as a problem.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Condition {
+    #[default]
+    Above,
+    Below,
+}
+
+impl Condition {
+    /// Whether the value is a problem.
+    pub fn holds(&self, value: f64, threshold: f64) -> bool {
+        match self {
+            Condition::Above => value > threshold,
+            Condition::Below => value < threshold,
         }
     }
 }
@@ -537,6 +594,34 @@ mod tests {
         assert_eq!(c.ui.theme, "dark");
         assert!(c.general.persist_history);
         assert_eq!(c.critical_processes.names, ["systemd", "sshd", "init"]);
+    }
+
+    #[test]
+    fn alert_rules_are_read() {
+        let c = Config::from_path(&fixture("config-alert-rules.toml")).unwrap();
+
+        assert_eq!(c.alerts.rules.len(), 2);
+        let rule = &c.alerts.rules[0];
+        assert_eq!(rule.name, "high-cpu");
+        assert_eq!(rule.metric, "cpu_percent");
+        assert_eq!(rule.condition, Condition::Above);
+        assert_eq!(rule.threshold, 90.0);
+        assert_eq!(rule.duration, Duration::from_secs(5));
+        assert_eq!(rule.severity, Severity::Warning);
+        assert!(rule.enabled);
+
+        assert_eq!(c.alerts.rules[1].condition, Condition::Below);
+        assert!(!c.alerts.rules[1].enabled);
+    }
+
+    #[test]
+    fn an_alert_rule_without_a_duration_is_an_error() {
+        let err = Config::from_toml(
+            "[[alerts.rules]]\nname = \"x\"\nmetric = \"cpu_percent\"\nduration = \"soon\"\n",
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("duration"), "{err}");
     }
 
     #[test]

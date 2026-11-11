@@ -144,6 +144,32 @@ fn inspecting_a_process_that_is_not_there_fails() {
 }
 
 #[test]
+fn an_alert_is_printed_as_it_is_raised() {
+    let dir = std::env::temp_dir().join(format!("sentinel-alert-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sentinel.toml"),
+        "[[alerts.rules]]\nname = \"always\"\nmetric = \"load_avg_1\"\ncondition = \"above\"\nthreshold = -1.0\nduration = \"1ms\"\nseverity = \"info\"\nmessage = \"the load average is above -1\"\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .args(["health", "--interval", "50ms"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("[INFO]"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("the load average is above -1"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

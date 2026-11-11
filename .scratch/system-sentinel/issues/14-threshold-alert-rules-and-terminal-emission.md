@@ -4,11 +4,11 @@
 
 **Blocked by:** 04: `sentinel health`: CPU and memory summary; 08: `sentinel ps`: process identity and memory listing.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Alert rules are read from config: metric, condition, threshold, duration, severity and message
-- [ ] A rule fires only after its condition has held for the configured duration, not on a single noisy sample
-- [ ] Each raised alert carries timestamp, severity, category, metric name, affected process, current value, threshold and a suggested action
-- [ ] Alerts are printed to the terminal as they are raised, with the severity visible
-- [ ] Rules can be disabled individually, and a disabled rule never fires
-- [ ] A test feeds a synthetic sample series into the engine and asserts the alert fires once the duration is met and not before
+- [x] Alert rules are read from config: metric, condition, threshold, duration, severity and message
+- [x] A rule fires only after its condition has held for the configured duration, not on a single noisy sample
+- [x] Each raised alert carries timestamp, severity, category, metric name, affected process, current value, threshold and a suggested action
+- [x] Alerts are printed to the terminal as they are raised, with the severity visible
+- [x] Rules can be disabled individually, and a disabled rule never fires
+- [x] A test feeds a synthetic sample series into the engine and asserts the alert fires once the duration is met and not before
