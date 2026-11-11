@@ -747,6 +747,13 @@ mod tests {
     }
 
     #[test]
+    fn the_network_attribution_is_off_until_it_is_asked_for() {
+        let c = Config::from_toml("[sampling]\nprocess_network = true").unwrap();
+
+        assert!(c.sampling.process_network);
+    }
+
+    #[test]
     fn low_resource_profile_keeps_a_longer_user_interval() {
         let c =
             Config::from_toml("[general]\nprofile = \"low-resource\"\ninterval = \"5s\"").unwrap();

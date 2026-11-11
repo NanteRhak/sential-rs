@@ -5,6 +5,7 @@
 //! fixtures without a real `/proc`.
 
 pub mod filesystem;
+pub mod net;
 pub mod proc;
 pub mod process;
 pub mod sensors;

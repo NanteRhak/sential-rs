@@ -496,15 +496,38 @@ pub fn processes_json(processes: &[ProcessSample]) -> String {
 ///
 /// A protected process is marked with a star, so it is obvious that the tool
 /// will not touch it.
-pub fn processes(processes: &[ProcessSample], protected: &[String]) -> String {
+pub fn processes(processes: &[ProcessSample], protected: &[String], show_network: bool) -> String {
     let mut out = String::new();
-    out.push_str(&format!(
-        "{:>7}  {:>7}  {:<10}  {:<5}  {:>6}  {:>9}  {:>10}  {:>10}  {:>6}  {:>6}  {}\n",
-        "PID", "PPID", "USER", "STATE", "CPU%", "ELAPSED", "RSS", "VSZ", "MEM%", "PRS", "NAME"
-    ));
-    for process in processes {
+    if show_network {
         out.push_str(&format!(
-            "{:>7}  {:>7}  {:<10}  {:<5}  {:>5.1}  {:>9}  {:>10}  {:>10}  {:>5.1}%  {:>5.1}  {}\n",
+            "{:>7}  {:>7}  {:<10}  {:<5}  {:>6}  {:>9}  {:>10}  {:>10}  {:>6}  {:>6}  {:>12}  {}\n",
+            "PID",
+            "PPID",
+            "USER",
+            "STATE",
+            "CPU%",
+            "ELAPSED",
+            "RSS",
+            "VSZ",
+            "MEM%",
+            "PRS",
+            "NET RX/TX",
+            "NAME"
+        ));
+    } else {
+        out.push_str(&format!(
+            "{:>7}  {:>7}  {:<10}  {:<5}  {:>6}  {:>9}  {:>10}  {:>10}  {:>6}  {:>6}  {}\n",
+            "PID", "PPID", "USER", "STATE", "CPU%", "ELAPSED", "RSS", "VSZ", "MEM%", "PRS", "NAME"
+        ));
+    }
+    for process in processes {
+        let network = if show_network {
+            format!("{:>12}  ", network_columns(process))
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "{:>7}  {:>7}  {:<10}  {:<5}  {:>5.1}  {:>9}  {:>10}  {:>10}  {:>5.1}%  {:>5.1}  {network}{}\n",
             process.pid,
             process.ppid,
             process.user,
@@ -519,6 +542,17 @@ pub fn processes(processes: &[ProcessSample], protected: &[String]) -> String {
         ));
     }
     out
+}
+
+/// The network columns of a process.
+///
+/// A platform that cannot attribute traffic to a process says so, rather
+/// than showing zero as if it were a measurement.
+pub fn network_columns(process: &ProcessSample) -> String {
+    match (process.net_rx_bytes_per_sec, process.net_tx_bytes_per_sec) {
+        (Some(rx), Some(tx)) => format!("{}/{}", bytes_to_human(rx), bytes_to_human(tx)),
+        _ => "n/a".to_string(),
+    }
 }
 
 /// The name of a process, marked when it is protected.
@@ -699,6 +733,35 @@ mod tests {
     }
 
     #[test]
+    fn a_platform_that_cannot_attribute_traffic_says_so() {
+        let sample = ProcessSample {
+            pid: 1,
+            name: "a".into(),
+            ..Default::default()
+        };
+
+        let text = processes(&[sample], &[], true);
+
+        assert!(text.contains("NET RX/TX"), "{text}");
+        assert!(text.contains("n/a"), "{text}");
+    }
+
+    #[test]
+    fn the_network_columns_are_left_out_when_the_feature_is_off() {
+        let sample = ProcessSample {
+            pid: 1,
+            name: "a".into(),
+            net_rx_bytes_per_sec: Some(100),
+            net_tx_bytes_per_sec: Some(200),
+            ..Default::default()
+        };
+
+        let text = processes(&[sample], &[], false);
+
+        assert!(!text.contains("NET RX/TX"), "{text}");
+    }
+
+    #[test]
     fn the_process_table_has_a_header_and_a_row() {
         let sample = ProcessSample {
             pid: 42,
@@ -713,7 +776,7 @@ mod tests {
             ..Default::default()
         };
 
-        let text = processes(&[sample], &[]);
+        let text = processes(&[sample], &[], false);
 
         assert!(text.contains("PID"), "{text}");
         assert!(text.contains("MEM%"), "{text}");

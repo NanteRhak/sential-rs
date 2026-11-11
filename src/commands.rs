@@ -78,7 +78,11 @@ fn ps(config: Config, sort: crate::cli::SortKey, json: bool) -> Result<(), Strin
     } else {
         print!(
             "{}",
-            view::processes(&processes, &config.critical_processes.names)
+            view::processes(
+                &processes,
+                &config.critical_processes.names,
+                config.sampling.process_network,
+            )
         );
     }
     Ok(())
@@ -101,7 +105,11 @@ fn top(config: Config, json: bool) -> Result<(), String> {
     } else {
         print!(
             "{}",
-            view::processes(&processes, &config.critical_processes.names)
+            view::processes(
+                &processes,
+                &config.critical_processes.names,
+                config.sampling.process_network,
+            )
         );
     }
     Ok(())
