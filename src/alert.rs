@@ -1,9 +1,11 @@
 //! The anomaly engine: rules that watch a metric and raise alerts.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Instant;
 
-use serde::Serialize;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
 
 use crate::config::AlertRule;
 use crate::core::Severity;
@@ -11,7 +13,7 @@ use crate::core::metrics::SystemSample;
 use crate::core::process::ProcessSample;
 
 /// What an alert is about.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlertCategory {
     Cpu,
     Memory,
@@ -58,7 +60,7 @@ impl AlertCategory {
 }
 
 /// One raised alert.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Alert {
     pub id: u64,
     pub timestamp: u64,
@@ -79,8 +81,8 @@ pub struct AlertEngine {
     rules: Vec<AlertRule>,
     /// When each rule's condition started holding.
     holding_since: HashMap<String, Instant>,
-    /// The rules that have already fired and are still holding.
-    fired: HashSet<String>,
+    /// When each rule last fired, so it can stay quiet for its cooldown.
+    last_fired: HashMap<String, Instant>,
     next_id: u64,
 }
 
@@ -89,7 +91,7 @@ impl AlertEngine {
         Self {
             rules,
             holding_since: HashMap::new(),
-            fired: HashSet::new(),
+            last_fired: HashMap::new(),
             next_id: 1,
         }
     }
@@ -120,17 +122,18 @@ impl AlertEngine {
             };
             if !rule.condition.holds(value, rule.threshold) {
                 self.holding_since.remove(&rule.name);
-                self.fired.remove(&rule.name);
+                continue;
+            }
+            if let Some(last) = self.last_fired.get(&rule.name)
+                && now.duration_since(*last) < rule.cooldown
+            {
                 continue;
             }
             let since = *self.holding_since.entry(rule.name.clone()).or_insert(now);
             if now.duration_since(since) < rule.duration {
                 continue;
             }
-            if self.fired.contains(&rule.name) {
-                continue;
-            }
-            self.fired.insert(rule.clone().name);
+            self.last_fired.insert(rule.name.clone(), now);
             let category = AlertCategory::of(&rule.metric);
             let id = self.next_id;
             self.next_id += 1;
@@ -150,6 +153,36 @@ impl AlertEngine {
         }
         raised
     }
+}
+
+/// Append an alert to the log file, one JSON object per line.
+pub fn append_alert(path: &Path, alert: &Alert) -> Result<(), String> {
+    use std::io::Write;
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("{}: {error}", path.display()))?;
+    let line = serde_json::to_string(alert).map_err(|error| error.to_string())?;
+    writeln!(file, "{line}").map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// Read the alerts from the log file, oldest first.
+///
+/// A line that cannot be read is skipped: a truncated log should not hide the
+/// alerts that are readable.
+pub fn read_alerts(path: &Path) -> Vec<Alert> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<Alert>(line).ok())
+        .collect()
 }
 
 /// The value of a named metric, and the process it belongs to.
@@ -246,6 +279,7 @@ mod tests {
             severity: Severity::Warning,
             message: "cpu is high".to_string(),
             enabled: true,
+            cooldown: Duration::from_secs(60),
         }
     }
 
@@ -297,6 +331,53 @@ mod tests {
 
         assert_eq!(first.len(), 1);
         assert!(second.is_empty(), "{second:?}");
+    }
+
+    #[test]
+    fn a_rule_does_not_fire_again_inside_its_cooldown() {
+        let mut rule = rule("cpu", 90.0, Duration::from_secs(1));
+        rule.cooldown = Duration::from_secs(30);
+        let mut engine = AlertEngine::new(vec![rule]);
+        let start = Instant::now();
+
+        let _ = engine.evaluate(&sample(95.0), &[], start);
+        let first = engine.evaluate(&sample(95.0), &[], start + Duration::from_secs(2));
+        assert_eq!(first.len(), 1);
+
+        let inside = engine.evaluate(&sample(95.0), &[], start + Duration::from_secs(10));
+        assert!(inside.is_empty(), "{inside:?}");
+
+        let after = engine.evaluate(&sample(95.0), &[], start + Duration::from_secs(40));
+        assert_eq!(after.len(), 1);
+    }
+
+    #[test]
+    fn the_log_file_receives_the_alert() {
+        let path =
+            std::env::temp_dir().join(format!("sentinel-alert-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let alert = Alert {
+            id: 1,
+            timestamp: 1_700_000_000_000,
+            severity: Severity::Warning,
+            category: AlertCategory::Cpu,
+            message: "cpu is high".into(),
+            metric: Some("cpu_percent".into()),
+            pid: None,
+            process_name: None,
+            current_value: 95.0,
+            threshold: Some(90.0),
+            suggestion: "look at the busiest processes".into(),
+        };
+
+        append_alert(&path, &alert).unwrap();
+        let read = read_alerts(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].message, "cpu is high");
+        assert_eq!(read[0].current_value, 95.0);
+        assert_eq!(read[0].severity, Severity::Warning);
     }
 
     #[test]

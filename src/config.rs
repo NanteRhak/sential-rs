@@ -155,6 +155,9 @@ pub struct AlertRule {
     pub severity: Severity,
     pub message: String,
     pub enabled: bool,
+    /// How long the rule stays quiet after it has fired.
+    #[serde(deserialize_with = "de_duration")]
+    pub cooldown: Duration,
 }
 
 impl Default for AlertRule {
@@ -168,6 +171,7 @@ impl Default for AlertRule {
             severity: Severity::Warning,
             message: String::new(),
             enabled: true,
+            cooldown: Duration::from_secs(60),
         }
     }
 }

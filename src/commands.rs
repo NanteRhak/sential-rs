@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use crate::alert::AlertEngine;
+use crate::alert::{AlertEngine, append_alert, read_alerts};
 use crate::cli::Command;
 use crate::collect::proc::ProcCollector;
 use crate::config::{Config, parse_duration};
@@ -17,7 +17,7 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
         Command::Top { json } => top(config, json),
         Command::Tui => crate::tui::run(config),
         Command::Watch => Err("watch is not implemented yet".into()),
-        Command::Alerts => Err("alerts is not implemented yet".into()),
+        Command::Alerts { last } => alerts(config, last),
         Command::Inspect { pid } => inspect(config, pid),
         Command::Kill => Err("kill is not implemented yet".into()),
         Command::Suspend => Err("suspend is not implemented yet".into()),
@@ -91,10 +91,41 @@ pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
     if !config.alerts.enabled || config.alerts.rules.is_empty() {
         return sampler;
     }
+    let log_file = config.alerts.log_file.clone();
     sampler.with_alerts(
         AlertEngine::new(config.alerts.rules.clone()),
-        Box::new(|alert| println!("{}", view::alert_line(alert))),
+        Box::new(move |alert| {
+            println!("{}", view::alert_line(alert));
+            if let Some(path) = &log_file
+                && let Err(error) = append_alert(path, alert)
+            {
+                eprintln!("sentinel: {error}");
+            }
+        }),
     )
+}
+
+/// The alerts of the last window, read back from the log file.
+fn alerts(config: Config, last: Option<String>) -> Result<(), String> {
+    let window = match last {
+        Some(text) => parse_duration(&text).map_err(|error| format!("--last: {error}"))?,
+        None => Duration::from_secs(3_600),
+    };
+    let Some(path) = config.alerts.log_file else {
+        return Err("no alert log is configured".into());
+    };
+    let cutoff = crate::collect::now_millis().saturating_sub(window.as_millis() as u64);
+    let recent: Vec<_> = read_alerts(&path)
+        .into_iter()
+        .filter(|alert| alert.timestamp >= cutoff)
+        .collect();
+    if recent.is_empty() {
+        return Ok(());
+    }
+    for alert in recent {
+        println!("{}", view::alert_line(&alert));
+    }
+    Ok(())
 }
 
 /// Two readings one interval apart, so the per-process rates are meaningful.

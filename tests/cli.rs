@@ -170,6 +170,51 @@ fn an_alert_is_printed_as_it_is_raised() {
 }
 
 #[test]
+fn alerts_are_read_back_from_the_log_file() {
+    let dir = std::env::temp_dir().join(format!("sentinel-log-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sentinel.toml"),
+        "[alerts]\nlog_file = \"alerts.jsonl\"\n\n[[alerts.rules]]\nname = \"always\"\nmetric = \"load_avg_1\"\ncondition = \"above\"\nthreshold = -1.0\nduration = \"1ms\"\nseverity = \"warning\"\nmessage = \"the load average is above -1\"\n",
+    )
+    .unwrap();
+
+    let health = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .args(["health", "--interval", "50ms"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    assert!(health.status.success(), "exit status: {:?}", health.status);
+
+    let out = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .args(["alerts", "--last", "1h"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+
+    let log = std::fs::read_to_string(dir.join("alerts.jsonl")).unwrap_or_default();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("[WARNING]"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("the load average is above -1"),
+        "stdout: {stdout}"
+    );
+    assert!(log.contains("the load average is above -1"), "log: {log}");
+}
+
+#[test]
+fn alerts_without_a_log_file_says_so() {
+    let out = sentinel(&["alerts"]);
+
+    assert!(!out.status.success(), "exit status: {:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no alert log"), "stderr: {stderr}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

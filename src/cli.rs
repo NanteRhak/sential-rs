@@ -52,7 +52,11 @@ pub enum Command {
     /// Sample at a high rate to catch short-lived spikes
     Watch,
     /// List recent alerts
-    Alerts,
+    Alerts {
+        /// Only alerts from the last window, for example 1h or 30m
+        #[arg(long, value_name = "DURATION")]
+        last: Option<String>,
+    },
     /// Show everything known about one process
     Inspect {
         /// The process to look at

@@ -4,10 +4,10 @@
 
 **Blocked by:** 14: Threshold alert rules and terminal emission.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A cooldown period per rule prevents the same alert from repeating until the cooldown expires
-- [ ] Alerts are appended to the configured log file in a machine-readable format
-- [ ] `sentinel alerts --last 1h` lists recent alerts filtered by the requested time window
-- [ ] Alert history survives a restart when the log file is configured
-- [ ] A test asserts a rule does not re-fire inside its cooldown and that the log file receives the alert
+- [x] A cooldown period per rule prevents the same alert from repeating until the cooldown expires
+- [x] Alerts are appended to the configured log file in a machine-readable format
+- [x] `sentinel alerts --last 1h` lists recent alerts filtered by the requested time window
+- [x] Alert history survives a restart when the log file is configured
+- [x] A test asserts a rule does not re-fire inside its cooldown and that the log file receives the alert
