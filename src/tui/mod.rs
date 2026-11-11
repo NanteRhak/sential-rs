@@ -3,8 +3,8 @@
 pub mod app;
 
 use std::io::{Stdout, stdout};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use ratatui::Terminal;
@@ -17,7 +17,7 @@ use ratatui::crossterm::terminal::{
 
 use crate::collect::proc::ProcCollector;
 use crate::config::Config;
-use crate::sample::{Sampler, SamplerState};
+use crate::sample::Sampler;
 
 use crate::view::Sort;
 
@@ -25,7 +25,8 @@ use app::App;
 
 /// Run the dashboard until the user quits.
 pub fn run(config: Config) -> Result<(), String> {
-    let mut sampler = Sampler::new(config.general.interval, Box::new(ProcCollector::default()));
+    let mut sampler = Sampler::new(config.general.interval, Box::new(ProcCollector::default()))
+        .with_history(config.general.history_duration);
     let state = sampler.handle();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
@@ -108,13 +109,11 @@ pub fn on_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// The state the dashboard reads, exposed for tests.
-pub type SharedState = Arc<RwLock<Arc<SamplerState>>>;
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::process::ProcessSample;
+    use crate::sample::Shared;
 
     fn process(pid: u32, name: &str, cpu: f64, rss: u64, read: u64) -> ProcessSample {
         ProcessSample {
@@ -234,8 +233,7 @@ mod tests {
 
     #[test]
     fn q_quits() {
-        let state = Arc::new(RwLock::new(Arc::new(SamplerState::default())));
-        let mut app = App::new(state);
+        let mut app = App::new(Arc::new(Shared::default()));
 
         on_key(
             &mut app,
@@ -247,8 +245,7 @@ mod tests {
 
     #[test]
     fn other_keys_do_not_quit() {
-        let state = Arc::new(RwLock::new(Arc::new(SamplerState::default())));
-        let mut app = App::new(state);
+        let mut app = App::new(Arc::new(Shared::default()));
 
         on_key(
             &mut app,

@@ -4,6 +4,7 @@
 //! Everything else — the CLI views, the TUI, the daemon — reads the state it
 //! publishes, so every view sees the same numbers.
 
+use std::collections::VecDeque;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -22,13 +23,56 @@ pub struct SamplerState {
     pub processes: Vec<ProcessSample>,
 }
 
+/// The state the sampler publishes, shared with the readers.
+#[derive(Default)]
+pub struct Shared {
+    state: RwLock<Arc<SamplerState>>,
+    history: RwLock<VecDeque<(Instant, Arc<SamplerState>)>>,
+}
+
+impl Shared {
+    /// The latest published sample.
+    pub fn state(&self) -> Arc<SamplerState> {
+        self.state
+            .read()
+            .map(|state| state.clone())
+            .unwrap_or_default()
+    }
+
+    /// The recent samples, oldest first.
+    pub fn history(&self) -> Vec<Arc<SamplerState>> {
+        self.history
+            .read()
+            .map(|history| history.iter().map(|(_, state)| state.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Publish a sample and remember it for as long as it is worth keeping.
+    pub fn publish(&self, state: Arc<SamplerState>, keep_for: Duration) {
+        let now = Instant::now();
+        if let Ok(mut history) = self.history.write() {
+            history.push_back((now, state.clone()));
+            while history
+                .front()
+                .is_some_and(|(at, _)| now.duration_since(*at) > keep_for)
+            {
+                history.pop_front();
+            }
+        }
+        if let Ok(mut slot) = self.state.write() {
+            *slot = state;
+        }
+    }
+}
+
 /// Publishes samples on a fixed interval.
 pub struct Sampler {
     interval: Duration,
+    history_duration: Duration,
     collector: Box<dyn Collector>,
     previous: Option<RawSnapshot>,
     deadline: Option<Instant>,
-    state: Arc<RwLock<Arc<SamplerState>>>,
+    shared: Arc<Shared>,
     last_error: Option<String>,
 }
 
@@ -36,12 +80,19 @@ impl Sampler {
     pub fn new(interval: Duration, collector: Box<dyn Collector>) -> Self {
         Self {
             interval,
+            history_duration: Duration::from_secs(60),
             collector,
             previous: None,
             deadline: None,
-            state: Arc::new(RwLock::new(Arc::new(SamplerState::default()))),
+            shared: Arc::new(Shared::default()),
             last_error: None,
         }
+    }
+
+    /// How much of the recent past to keep.
+    pub fn with_history(mut self, history_duration: Duration) -> Self {
+        self.history_duration = history_duration;
+        self
     }
 
     pub fn interval(&self) -> Duration {
@@ -49,17 +100,14 @@ impl Sampler {
     }
 
     /// A handle to the published state, for readers on another thread.
-    pub fn handle(&self) -> Arc<RwLock<Arc<SamplerState>>> {
-        self.state.clone()
+    pub fn handle(&self) -> Arc<Shared> {
+        self.shared.clone()
     }
 
     /// The published state. Readers clone the inner `Arc` and never hold the
     /// lock while they work, so a slow reader cannot hold up collection.
     pub fn state(&self) -> Arc<SamplerState> {
-        self.state
-            .read()
-            .map(|state| state.clone())
-            .unwrap_or_default()
+        self.shared.state()
     }
 
     /// The reason the last reading failed, if it did.
@@ -98,9 +146,7 @@ impl Sampler {
             system,
             processes,
         });
-        if let Ok(mut slot) = self.state.write() {
-            *slot = state.clone();
-        }
+        self.shared.publish(state.clone(), self.history_duration);
         state
     }
 
