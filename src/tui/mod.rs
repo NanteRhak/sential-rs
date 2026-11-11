@@ -105,6 +105,7 @@ pub fn on_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('/') => app.start_search(),
         KeyCode::Up => app.selected = app.selected.saturating_sub(1),
         KeyCode::Down => app.selected += 1,
+        KeyCode::Enter => app.detail = !app.detail,
         _ => {}
     }
 }

@@ -291,6 +291,61 @@ pub fn net_bytes(process: &ProcessSample) -> u64 {
     process.net_rx_bytes_per_sec.unwrap_or(0) + process.net_tx_bytes_per_sec.unwrap_or(0)
 }
 
+/// Everything known about one process.
+pub fn process_detail(process: &ProcessSample) -> String {
+    let mut out = String::new();
+    out.push_str(&row(
+        "Process",
+        &format!("{} ({})", process.name, process.pid),
+    ));
+    out.push_str(&row(
+        "Command",
+        if process.cmd.is_empty() {
+            "not readable"
+        } else {
+            &process.cmd
+        },
+    ));
+    out.push_str(&row("Parent", &process.ppid.to_string()));
+    out.push_str(&row("User", &process.user));
+    out.push_str(&row(
+        "Started",
+        &format!(
+            "{} (up {})",
+            clock(process.started_at),
+            uptime(process.uptime_secs)
+        ),
+    ));
+    out.push_str(&row(
+        "Usage",
+        &format!(
+            "cpu {:.1}%  memory {} ({:.1}%)",
+            process.cpu_percent,
+            bytes_to_human(process.mem_rss_bytes),
+            process.mem_percent
+        ),
+    ));
+    out.push_str(&row("Threads", &process.thread_count.to_string()));
+    out.push_str(&row("File descriptors", &process.fd_count.to_string()));
+    out.push_str(&row("Nice", &process.nice.to_string()));
+    out.push_str(&row(
+        "Cgroup",
+        process.cgroup.as_deref().unwrap_or("not readable"),
+    ));
+    out
+}
+
+/// The time of day, in UTC.
+pub fn clock(epoch_secs: u64) -> String {
+    let seconds = epoch_secs % 86_400;
+    format!(
+        "{:02}:{:02}:{:02} UTC",
+        seconds / 3_600,
+        (seconds % 3_600) / 60,
+        seconds % 60
+    )
+}
+
 /// The process list as JSON, for scripting.
 pub fn processes_json(processes: &[ProcessSample]) -> String {
     let value = serde_json::json!({ "processes": processes });

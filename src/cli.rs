@@ -54,7 +54,10 @@ pub enum Command {
     /// List recent alerts
     Alerts,
     /// Show everything known about one process
-    Inspect,
+    Inspect {
+        /// The process to look at
+        pid: u32,
+    },
     /// Terminate a process safely
     Kill,
     /// Suspend a process

@@ -34,6 +34,17 @@ impl ProcFs {
         std::fs::read_to_string(self.root.join(path)).ok()
     }
 
+    /// When the machine booted, in seconds since the epoch.
+    pub fn boot_time(&self) -> u64 {
+        self.read("stat")
+            .and_then(|text| {
+                text.lines()
+                    .find_map(|line| line.strip_prefix("btime "))
+                    .and_then(|value| value.trim().parse().ok())
+            })
+            .unwrap_or(0)
+    }
+
     pub fn cpu_counters(&self) -> Option<CpuCounters> {
         self.read("stat").and_then(|text| parse_stat(&text))
     }
@@ -98,9 +109,15 @@ impl ProcFs {
 
     /// Every process on the machine. One that exits mid-scan is simply missing.
     pub fn processes(&self) -> Vec<super::process::ProcessCounters> {
+        let boot = self.boot_time();
+        let ticks = super::process::clock_ticks();
         super::process::pids(&self.root)
             .into_iter()
-            .filter_map(|pid| super::process::read(&self.root, pid))
+            .filter_map(|pid| {
+                let mut process = super::process::read(&self.root, pid)?;
+                process.started_at = boot + (process.start_time as f64 / ticks) as u64;
+                Some(process)
+            })
             .collect()
     }
 

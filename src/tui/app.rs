@@ -48,6 +48,8 @@ pub struct App {
     pub search: Option<String>,
     /// The search being typed, before it is applied.
     pub typing: Option<String>,
+    /// Whether the detail panel is open.
+    pub detail: bool,
 }
 
 impl App {
@@ -61,6 +63,7 @@ impl App {
             filter: None,
             search: None,
             typing: None,
+            detail: false,
         }
     }
 
@@ -240,6 +243,14 @@ impl App {
     }
 
     fn draw_processes(&self, frame: &mut Frame, area: Rect) {
+        let (table_area, detail_area) = if self.detail {
+            let halves =
+                Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                    .split(area);
+            (halves[0], Some(halves[1]))
+        } else {
+            (area, None)
+        };
         let processes = self.rows();
         let header = Row::new(vec![
             Cell::from("PID"),
@@ -281,7 +292,83 @@ impl App {
         .header(header)
         .row_highlight_style(Style::default().fg(Color::Yellow))
         .block(Block::default().borders(Borders::ALL).title(title));
-        frame.render_widget(table, area);
+        frame.render_widget(table, table_area);
+        if let Some(detail_area) = detail_area {
+            self.draw_detail(frame, detail_area);
+        }
+    }
+
+    /// The detail of the selected process, with its recent usage.
+    fn draw_detail(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default().borders(Borders::ALL).title(" Detail ");
+        let Some(process) = self.selected_process() else {
+            frame.render_widget(Paragraph::new("no process selected").block(block), area);
+            return;
+        };
+        let mut lines: Vec<Line> = vec![
+            Line::from(format!("{} ({})", process.name, process.pid)),
+            Line::from(format!(
+                "cmd {}",
+                if process.cmd.is_empty() {
+                    "not readable"
+                } else {
+                    &process.cmd
+                }
+            )),
+            Line::from(format!(
+                "cpu {:.1}%  memory {} ({:.1}%)",
+                process.cpu_percent,
+                bytes_to_human(process.mem_rss_bytes),
+                process.mem_percent
+            )),
+            Line::from(format!(
+                "threads {}  fds {}  nice {}",
+                process.thread_count, process.fd_count, process.nice
+            )),
+            Line::from(format!(
+                "cgroup {}",
+                process.cgroup.as_deref().unwrap_or("not readable")
+            )),
+        ];
+        let series = self.process_series(process.pid);
+        if series.len() >= 2 {
+            let graph = Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).split(area);
+            frame.render_widget(Paragraph::new(lines).block(block), graph[0]);
+            let sparkline = Sparkline::default()
+                .data(&series)
+                .max(100)
+                .style(Style::default().fg(Color::Green));
+            frame.render_widget(
+                sparkline.block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Recent CPU % "),
+                ),
+                graph[1],
+            );
+            return;
+        }
+        lines.push(Line::from("no usage history yet"));
+        frame.render_widget(Paragraph::new(lines).block(block), area);
+    }
+
+    /// The process the table has selected.
+    pub fn selected_process(&self) -> Option<ProcessSample> {
+        self.rows().get(self.selected).cloned()
+    }
+
+    /// The CPU usage of a process over the recent history.
+    pub fn process_series(&self, pid: u32) -> Vec<u64> {
+        self.history()
+            .iter()
+            .filter_map(|state| {
+                state
+                    .processes
+                    .iter()
+                    .find(|process| process.pid == pid)
+                    .map(|process| process.cpu_percent.round() as u64)
+            })
+            .collect()
     }
 }
 
@@ -463,6 +550,48 @@ mod tests {
         let text = render(&app, 120, 40);
 
         assert!(text.contains("no data"), "{text}");
+    }
+
+    #[test]
+    fn the_detail_panel_shows_the_command_line_of_the_selected_process() {
+        let process = ProcessSample {
+            pid: 42,
+            name: "backup".into(),
+            cmd: "/usr/bin/backup --full".into(),
+            user: "root".into(),
+            cpu_percent: 12.5,
+            mem_rss_bytes: 1024 * 1024,
+            mem_percent: 1.5,
+            thread_count: 4,
+            fd_count: 12,
+            ..Default::default()
+        };
+        let mut app = App::with_processes(vec![process]);
+        app.detail = true;
+
+        let text = render(&app, 120, 40);
+
+        assert!(text.contains("Detail"), "{text}");
+        assert!(text.contains("/usr/bin/backup --full"), "{text}");
+        assert!(text.contains("12.5"), "{text}");
+        assert!(text.contains("threads 4"), "{text}");
+    }
+
+    #[test]
+    fn a_process_that_cannot_be_read_shows_what_is_available() {
+        let process = ProcessSample {
+            pid: 42,
+            name: "secret".into(),
+            cmd: String::new(),
+            user: "root".into(),
+            ..Default::default()
+        };
+        let mut app = App::with_processes(vec![process]);
+        app.detail = true;
+
+        let text = render(&app, 120, 40);
+
+        assert!(text.contains("not readable"), "{text}");
     }
 
     #[test]

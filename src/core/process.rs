@@ -28,6 +28,10 @@ pub struct ProcessSample {
     /// Seconds since the process started.
     pub uptime_secs: u64,
     pub ppid: u32,
+    /// When the process started, in seconds since the epoch.
+    pub started_at: u64,
+    /// The cgroup the process belongs to, when it can be read.
+    pub cgroup: Option<String>,
 }
 
 /// The one-letter process states reported by Linux.

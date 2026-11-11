@@ -28,6 +28,10 @@ pub struct ProcessCounters {
     pub thread_count: u32,
     pub fd_count: u32,
     pub nice: i32,
+    /// The cgroup the process belongs to, when it can be read.
+    pub cgroup: Option<String>,
+    /// When the process started, in seconds since the epoch.
+    pub started_at: u64,
 }
 
 /// The fields of `/proc/<pid>/stat` that matter here.
@@ -99,7 +103,17 @@ pub fn read(root: &Path, pid: u32) -> Option<ProcessCounters> {
         thread_count: fields.num_threads,
         fd_count: fd_count(&dir),
         nice: fields.nice,
+        cgroup: read_cgroup(&dir),
+        started_at: 0,
     })
+}
+
+/// The cgroup the process belongs to.
+fn read_cgroup(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("cgroup")).ok()?;
+    let last = text.lines().rev().find(|line| !line.is_empty())?;
+    let path = last.splitn(3, ':').nth(2)?;
+    (!path.is_empty()).then(|| path.to_string())
 }
 
 const PAGE_SIZE: u64 = 4096;
@@ -313,6 +327,8 @@ pub fn process_samples(
                 pressure_score: 0.0,
                 uptime_secs: (uptime_secs - started).max(0.0) as u64,
                 ppid: process.ppid,
+                started_at: process.started_at,
+                cgroup: process.cgroup.clone(),
             }
         })
         .collect()

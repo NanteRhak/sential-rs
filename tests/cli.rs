@@ -119,6 +119,31 @@ fn top_prints_the_process_table_sorted_by_cpu() {
 }
 
 #[test]
+fn inspect_shows_the_detail_of_a_process() {
+    let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+    let pid = child.id();
+
+    let out = sentinel(&["inspect", &pid.to_string()]);
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Command"), "output: {stdout}");
+    assert!(stdout.contains("sleep"), "output: {stdout}");
+    assert!(stdout.contains("Cgroup"), "output: {stdout}");
+}
+
+#[test]
+fn inspecting_a_process_that_is_not_there_fails() {
+    let out = sentinel(&["inspect", "999999999"]);
+
+    assert!(!out.status.success(), "exit status: {:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("999999999"), "stderr: {stderr}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

@@ -17,7 +17,7 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
         Command::Tui => crate::tui::run(config),
         Command::Watch => Err("watch is not implemented yet".into()),
         Command::Alerts => Err("alerts is not implemented yet".into()),
-        Command::Inspect => Err("inspect is not implemented yet".into()),
+        Command::Inspect { pid } => inspect(config, pid),
         Command::Kill => Err("kill is not implemented yet".into()),
         Command::Suspend => Err("suspend is not implemented yet".into()),
         Command::Resume => Err("resume is not implemented yet".into()),
@@ -54,6 +54,15 @@ fn ps(config: Config, sort: crate::cli::SortKey, json: bool) -> Result<(), Strin
     } else {
         print!("{}", view::processes(&processes));
     }
+    Ok(())
+}
+
+fn inspect(config: Config, pid: u32) -> Result<(), String> {
+    let processes = sample_processes(&config)?;
+    let Some(process) = processes.iter().find(|process| process.pid == pid) else {
+        return Err(format!("no process {pid}"));
+    };
+    print!("{}", view::process_detail(process));
     Ok(())
 }
 
