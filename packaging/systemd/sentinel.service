@@ -1,6 +1,6 @@
 [Unit]
 Description=Rust System Sentinel, a lightweight Linux system monitor
-Documentation=https://github.com/NanteRhak/rust-system-sentinel
+Documentation=https://github.com/NanteRhak/sential-rs
 After=network.target
 
 [Service]
