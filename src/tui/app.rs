@@ -452,7 +452,7 @@ impl App {
                         action.detail()
                     )));
                 }
-                lines.push(Line::from(" d: dry run   esc: close"));
+                lines.push(Line::from(" k/s/r/n: act   d: dry run   esc: close"));
             }
             Some(Menu::Value(action)) => {
                 lines.push(Line::from(format!(
@@ -787,29 +787,32 @@ fn load_summary(sample: &SystemSample) -> String {
     )
 }
 
+/// The dashboard, rendered as plain text.
+///
+/// Used by the tests and by the `dashboard` example, which is how the README
+/// picture is made.
+pub fn render(app: &App, width: u16, height: u16) -> String {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            text.push_str(buffer.cell((x, y)).map(|cell| cell.symbol()).unwrap_or(" "));
+        }
+        text.push('\n');
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
 
     fn app() -> App {
         App::new(Arc::new(Shared::default()))
-    }
-
-    /// The rendered screen, as plain text.
-    pub fn render(app: &App, width: u16, height: u16) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal.draw(|frame| app.draw(frame)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let mut text = String::new();
-        for y in 0..buffer.area.height {
-            for x in 0..buffer.area.width {
-                text.push_str(buffer.cell((x, y)).map(|cell| cell.symbol()).unwrap_or(" "));
-            }
-            text.push('\n');
-        }
-        text
     }
 
     #[test]

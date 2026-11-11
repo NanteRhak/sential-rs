@@ -114,6 +114,10 @@ pub fn on_key(app: &mut App, key: KeyEvent) {
         KeyCode::Down => app.selected += 1,
         KeyCode::Enter => app.detail = !app.detail,
         KeyCode::Char('a') => app.open_menu(),
+        KeyCode::Char('k') => app.choose(PolicyAction::Kill),
+        KeyCode::Char('s') => app.choose(PolicyAction::Suspend),
+        KeyCode::Char('r') => app.choose(PolicyAction::Resume),
+        KeyCode::Char('n') => app.choose(PolicyAction::Renice),
         _ => {}
     }
 }
@@ -285,6 +289,25 @@ mod tests {
 
         assert!(!app.should_quit);
         assert_eq!(app.typing.as_deref(), Some("q"));
+    }
+
+    #[test]
+    fn the_action_keys_choose_the_action() {
+        for (key, expected) in [
+            ('k', PolicyAction::Kill),
+            ('s', PolicyAction::Suspend),
+            ('r', PolicyAction::Resume),
+        ] {
+            let mut app = app();
+
+            press(&mut app, key);
+
+            assert_eq!(
+                app.pending_action().map(|(action, _)| action),
+                Some(expected),
+                "the key {key} chose the wrong action"
+            );
+        }
     }
 
     #[test]
