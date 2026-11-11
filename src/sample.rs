@@ -4,7 +4,6 @@
 //! Everything else — the CLI views, the TUI, the daemon — reads the state it
 //! publishes, so every view sees the same numbers.
 
-use std::collections::VecDeque;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -15,6 +14,7 @@ use crate::collect::process;
 use crate::collect::{Collector, RawSnapshot, sample_between};
 use crate::core::metrics::SystemSample;
 use crate::core::process::ProcessSample;
+use crate::history::{CAPACITY, Ring};
 
 /// The latest published state. Cloning is cheap: it holds no locks.
 #[derive(Debug, Clone, Default)]
@@ -30,13 +30,26 @@ pub struct SamplerState {
 pub type AlertSink = Box<dyn Fn(&Alert) + Send>;
 
 /// The state the sampler publishes, shared with the readers.
-#[derive(Default)]
 pub struct Shared {
     state: RwLock<Arc<SamplerState>>,
-    history: RwLock<VecDeque<(Instant, Arc<SamplerState>)>>,
+    history: RwLock<Ring<Arc<SamplerState>>>,
+}
+
+impl Default for Shared {
+    fn default() -> Self {
+        Shared::new(Duration::from_secs(60))
+    }
 }
 
 impl Shared {
+    /// A shared state that keeps the recent samples for a while.
+    pub fn new(keep_for: Duration) -> Self {
+        Self {
+            state: RwLock::new(Arc::new(SamplerState::default())),
+            history: RwLock::new(Ring::new(keep_for, CAPACITY)),
+        }
+    }
+
     /// The latest published sample.
     pub fn state(&self) -> Arc<SamplerState> {
         self.state
@@ -49,21 +62,15 @@ impl Shared {
     pub fn history(&self) -> Vec<Arc<SamplerState>> {
         self.history
             .read()
-            .map(|history| history.iter().map(|(_, state)| state.clone()).collect())
+            .map(|history| history.to_vec().into_iter().cloned().collect())
             .unwrap_or_default()
     }
 
     /// Publish a sample and remember it for as long as it is worth keeping.
-    pub fn publish(&self, state: Arc<SamplerState>, keep_for: Duration) {
+    pub fn publish(&self, state: Arc<SamplerState>, _keep_for: Duration) {
         let now = Instant::now();
         if let Ok(mut history) = self.history.write() {
-            history.push_back((now, state.clone()));
-            while history
-                .front()
-                .is_some_and(|(at, _)| now.duration_since(*at) > keep_for)
-            {
-                history.pop_front();
-            }
+            history.push(state.clone(), now);
         }
         if let Ok(mut slot) = self.state.write() {
             *slot = state;
@@ -86,13 +93,14 @@ pub struct Sampler {
 
 impl Sampler {
     pub fn new(interval: Duration, collector: Box<dyn Collector>) -> Self {
+        let history_duration = Duration::from_secs(60);
         Self {
             interval,
-            history_duration: Duration::from_secs(60),
+            history_duration,
             collector,
             previous: None,
             deadline: None,
-            shared: Arc::new(Shared::default()),
+            shared: Arc::new(Shared::new(history_duration)),
             last_error: None,
             alerts: None,
             on_alert: None,
@@ -115,6 +123,7 @@ impl Sampler {
     /// How much of the recent past to keep.
     pub fn with_history(mut self, history_duration: Duration) -> Self {
         self.history_duration = history_duration;
+        self.shared = Arc::new(Shared::new(history_duration));
         self
     }
 
