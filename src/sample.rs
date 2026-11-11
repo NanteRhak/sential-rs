@@ -26,6 +26,7 @@ pub struct Sampler {
     previous: Option<RawSnapshot>,
     deadline: Option<Instant>,
     state: Arc<RwLock<Arc<SamplerState>>>,
+    last_error: Option<String>,
 }
 
 impl Sampler {
@@ -36,6 +37,7 @@ impl Sampler {
             previous: None,
             deadline: None,
             state: Arc::new(RwLock::new(Arc::new(SamplerState::default()))),
+            last_error: None,
         }
     }
 
@@ -52,9 +54,21 @@ impl Sampler {
             .unwrap_or_default()
     }
 
+    /// The reason the last reading failed, if it did.
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
+    }
+
     /// Take one reading and publish the sample it produces.
     pub fn tick(&mut self) -> Arc<SamplerState> {
-        let reading = self.collector.collect();
+        let reading = match self.collector.collect() {
+            Ok(reading) => reading,
+            Err(error) => {
+                self.last_error = Some(error);
+                return self.state();
+            }
+        };
+        self.last_error = None;
         let system = sample_between(&reading, self.previous.as_ref());
         self.previous = Some(reading);
 
@@ -120,15 +134,15 @@ impl FakeCollector {
 
 #[cfg(test)]
 impl Collector for FakeCollector {
-    fn collect(&mut self) -> RawSnapshot {
+    fn collect(&mut self) -> Result<RawSnapshot, String> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         if !self.readings.is_empty() {
-            return self.readings.remove(0);
+            return Ok(self.readings.remove(0));
         }
-        RawSnapshot {
+        Ok(RawSnapshot {
             at: Instant::now(),
             ..Default::default()
-        }
+        })
     }
 }
 

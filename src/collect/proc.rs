@@ -92,12 +92,20 @@ pub fn parse_stat(text: &str) -> Option<CpuCounters> {
                 counters.per_core.push(parse_cpu_times(rest)?);
             }
         } else if let Some(rest) = line.strip_prefix("intr ") {
-            counters.interrupts = rest.trim().parse().unwrap_or(0);
+            counters.interrupts = first_number(rest);
         } else if let Some(rest) = line.strip_prefix("ctxt ") {
-            counters.context_switches = rest.trim().parse().unwrap_or(0);
+            counters.context_switches = first_number(rest);
         }
     }
     found.then_some(counters)
+}
+
+/// The first number of a line, ignoring whatever follows it.
+fn first_number(text: &str) -> u64 {
+    text.split_whitespace()
+        .next()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0)
 }
 
 /// Parse one `cpu` line: ten fields, of which `guest` is already inside `user`.
@@ -266,16 +274,18 @@ impl ProcCollector {
 }
 
 impl super::Collector for ProcCollector {
-    fn collect(&mut self) -> super::RawSnapshot {
-        super::RawSnapshot {
+    fn collect(&mut self) -> Result<super::RawSnapshot, String> {
+        let cpu = self.fs.cpu_counters().ok_or("cannot read /proc/stat")?;
+        let memory = self.fs.memory().ok_or("cannot read /proc/meminfo")?;
+        Ok(super::RawSnapshot {
             at: std::time::Instant::now(),
-            cpu: self.fs.cpu_counters().unwrap_or_default(),
-            memory: self.fs.memory().unwrap_or_default(),
+            cpu,
+            memory,
             disk: self.fs.disk_counters(),
             network: self.fs.network_counters(),
             load_avg: self.fs.load_avg().unwrap_or_default(),
             pressure: self.fs.pressure(),
-        }
+        })
     }
 }
 
@@ -300,6 +310,16 @@ mod tests {
         assert_eq!(counters.per_core.len(), 2);
         assert_eq!(counters.interrupts, 1234);
         assert_eq!(counters.context_switches, 5678);
+    }
+
+    #[test]
+    fn stat_reads_the_first_number_of_the_intr_line() {
+        let text = "cpu 1 2 3 4 5 6 7 8 0 0\nintr 999 0 0\nctxt 4242\n";
+
+        let counters = parse_stat(text).unwrap();
+
+        assert_eq!(counters.interrupts, 999);
+        assert_eq!(counters.context_switches, 4242);
     }
 
     #[test]

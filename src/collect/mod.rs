@@ -119,7 +119,8 @@ pub struct PressureCounters {
 
 /// Something that can produce a raw reading.
 pub trait Collector: Send {
-    fn collect(&mut self) -> RawSnapshot;
+    /// Read the machine. `Err` means the reading could not be taken at all.
+    fn collect(&mut self) -> Result<RawSnapshot, String>;
 }
 
 /// The difference between two counter readings.

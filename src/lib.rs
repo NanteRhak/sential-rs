@@ -3,7 +3,10 @@
 //! This crate is the platform-independent model and logic. Operating-system
 //! collection is kept out of [`core`]; the binary in `main.rs` wires it up.
 
+pub mod cli;
 pub mod collect;
+pub mod commands;
 pub mod config;
 pub mod core;
 pub mod sample;
+pub mod view;

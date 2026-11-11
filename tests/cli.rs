@@ -39,6 +39,27 @@ fn version_is_printed() {
 }
 
 #[test]
+fn health_prints_the_cpu_memory_and_swap_rows() {
+    let out = sentinel(&["health", "--interval", "50ms"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(stdout.contains("CPU"), "output: {stdout}");
+    assert!(stdout.contains("Memory"), "output: {stdout}");
+    assert!(stdout.contains("Swap"), "output: {stdout}");
+    assert!(stdout.contains("Load average"), "output: {stdout}");
+}
+
+#[test]
+fn a_bad_interval_is_refused() {
+    let out = sentinel(&["health", "--interval", "fast"]);
+
+    assert!(!out.status.success(), "exit status: {:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--interval"), "stderr: {stderr}");
+}
+
+#[test]
 fn broken_local_config_fails_before_running_the_command() {
     let dir = std::env::temp_dir().join(format!("sentinel-cli-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

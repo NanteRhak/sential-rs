@@ -4,11 +4,11 @@
 
 **Blocked by:** 03: Sampling loop with delta and rate computation.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The command prints total CPU percentage, per-core percentages, the user/system/iowait/idle breakdown and load average
-- [ ] Memory rows show total, used, available, cached and swap usage
-- [ ] CPU percentages are computed from deltas between ticks, not from counters accumulated since boot
-- [ ] `sentinel health --interval <duration>` overrides the configured sampling interval for one run
-- [ ] The command exits non-zero with a clear message when the metrics cannot be read
-- [ ] A test asserts the output contains the CPU, memory and swap rows
+- [x] The command prints total CPU percentage, per-core percentages, the user/system/iowait/idle breakdown and load average
+- [x] Memory rows show total, used, available, cached and swap usage
+- [x] CPU percentages are computed from deltas between ticks, not from counters accumulated since boot
+- [x] `sentinel health --interval <duration>` overrides the configured sampling interval for one run
+- [x] The command exits non-zero with a clear message when the metrics cannot be read
+- [x] A test asserts the output contains the CPU, memory and swap rows

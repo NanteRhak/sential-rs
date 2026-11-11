@@ -264,7 +264,8 @@ fn unit_list() -> String {
         .join(", ")
 }
 
-fn parse_duration(text: &str) -> Result<Duration, String> {
+/// Parse a duration such as `500ms`, `2s`, `10m` or `1h`.
+pub fn parse_duration(text: &str) -> Result<Duration, String> {
     let text = text.trim();
     let split = text
         .find(|c: char| !c.is_ascii_digit() && c != '.')
