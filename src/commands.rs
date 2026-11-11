@@ -106,7 +106,7 @@ fn top(config: Config, json: bool) -> Result<(), String> {
 /// A sampler that watches the configured rules and prints the alerts it
 /// raises as they happen.
 pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
-    let sampler = Sampler::new(interval, Box::new(ProcCollector::default()))
+    let mut sampler = Sampler::new(interval, Box::new(ProcCollector::default()))
         .with_history(config.general.history_duration)
         .with_detection(
             config.detection.restart_count,
@@ -117,25 +117,34 @@ pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
         .with_policies(crate::policy::PolicyEngine::new(
             config.policies.rules.clone(),
         ));
-    if !config.alerts.enabled || config.alerts.rules.is_empty() {
-        return sampler;
+
+    if config.alerts.enabled && !config.alerts.rules.is_empty() {
+        let log_file = config.alerts.log_file.clone();
+        sampler = sampler.with_alerts(
+            AlertEngine::new(config.alerts.rules.clone()),
+            Box::new(move |alert| {
+                println!("{}", view::alert_line(alert));
+                if let Some(path) = &log_file
+                    && let Err(error) = append_alert(path, alert)
+                {
+                    eprintln!("sentinel: {error}");
+                }
+            }),
+        );
     }
-    let log_file = config.alerts.log_file.clone();
-    sampler.with_alerts(
-        AlertEngine::new(config.alerts.rules.clone()),
-        Box::new(move |alert| {
-            println!("{}", view::alert_line(alert));
-            if let Some(path) = &log_file
-                && let Err(error) = append_alert(path, alert)
-            {
-                eprintln!("sentinel: {error}");
-            }
-        }),
-    )
+
+    if config.general.persist_history
+        && let Some(store) = history_store(config)
+    {
+        sampler = sampler.with_history_store(
+            store.with_max_bytes(config.history.max_bytes),
+            Duration::from_secs(5),
+        );
+    }
+
+    sampler
 }
 
-/// Terminate a process, carefully.
-/// Terminate a process, carefully.
 fn kill(
     config: Config,
     pid: u32,
@@ -344,6 +353,7 @@ fn watch(config: Config, interval: Option<String>, duration: Option<String>) -> 
             println!("[policy] {}", view::proposal_line(proposal));
         }
     });
+    sampler.flush_history();
     Ok(())
 }
 
@@ -385,8 +395,17 @@ fn history_store(config: &Config) -> Option<crate::store::Store> {
     if !config.general.persist_history {
         return None;
     }
-    let dir = config.general.data_dir.clone()?;
+    let dir = config.general.data_dir.clone().or_else(default_data_dir)?;
     Some(crate::store::Store::new(crate::store::history_path(&dir)))
+}
+
+/// Where the tool keeps its data when nothing else is said.
+fn default_data_dir() -> Option<std::path::PathBuf> {
+    let base = match std::env::var_os("XDG_DATA_HOME") {
+        Some(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
+        _ => std::path::PathBuf::from(std::env::var_os("HOME")?).join(".local/share"),
+    };
+    Some(base.join("sentinel"))
 }
 
 /// The alerts of the last window, read back from the log file.

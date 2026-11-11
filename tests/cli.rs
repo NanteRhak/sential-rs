@@ -483,6 +483,38 @@ fn the_report_covers_the_window_it_was_asked_for() {
 }
 
 #[test]
+fn history_is_kept_on_disk_and_the_report_reads_it_back() {
+    let dir = std::env::temp_dir().join(format!("sentinel-history-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sentinel.toml"),
+        "[general]\npersist_history = true\ndata_dir = \"data\"\n",
+    )
+    .unwrap();
+
+    let watch = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .args(["watch", "--interval", "100ms", "--duration", "1s"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    assert!(watch.status.success(), "exit status: {:?}", watch.status);
+
+    let report = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .args(["report", "--last", "1h"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    let stdout = String::from_utf8_lossy(&report.stdout);
+    let history = std::fs::read_to_string(dir.join("data/history.jsonl")).unwrap_or_default();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(report.status.success(), "exit status: {:?}", report.status);
+    assert!(!history.is_empty(), "nothing was written to the history");
+    assert!(stdout.contains("samples"), "stdout: {stdout}");
+    assert!(!stdout.contains("(0 samples)"), "stdout: {stdout}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

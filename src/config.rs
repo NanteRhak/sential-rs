@@ -19,6 +19,7 @@ pub struct Config {
     pub alerts: Alerts,
     pub actions: Actions,
     pub detection: Detection,
+    pub history: History,
     pub pressure: Pressure,
     pub policies: Policies,
     pub critical_processes: CriticalProcesses,
@@ -236,6 +237,22 @@ impl Condition {
             Condition::Above => value > threshold,
             Condition::Below => value < threshold,
             Condition::Spike => false,
+        }
+    }
+}
+
+/// How much history is kept on disk.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct History {
+    /// How much space the history file may take.
+    pub max_bytes: u64,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self {
+            max_bytes: 10 * 1024 * 1024,
         }
     }
 }

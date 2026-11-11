@@ -101,6 +101,7 @@ pub struct Sampler {
     weights: crate::pressure::Weights,
     policies: Option<PolicyEngine>,
     executor: Option<crate::action::Executor>,
+    writer: Option<crate::store::HistoryWriter>,
 }
 
 impl Sampler {
@@ -120,7 +121,23 @@ impl Sampler {
             weights: crate::pressure::Weights::default(),
             policies: None,
             executor: None,
+            writer: None,
         }
+    }
+
+    /// Write the history that is waiting to be written.
+    pub fn flush_history(&mut self) {
+        if let Some(writer) = &mut self.writer
+            && let Err(error) = writer.flush()
+        {
+            eprintln!("sentinel: cannot write the history: {error}");
+        }
+    }
+
+    /// Keep the history on disk, so it survives a restart.
+    pub fn with_history_store(mut self, store: crate::store::Store, batch: Duration) -> Self {
+        self.writer = Some(crate::store::HistoryWriter::new(store, batch));
+        self
     }
 
     /// Perform the actions the policies propose.
@@ -248,6 +265,13 @@ impl Sampler {
         if let Some(executor) = &self.executor {
             for proposal in &proposals {
                 executor.perform(proposal, proposal.allow_protected);
+            }
+        }
+        if let Some(writer) = &mut self.writer {
+            writer.push(crate::store::StoredSample::of(&system, &processes));
+            // A disk that is full is reported, and monitoring carries on.
+            if let Err(error) = writer.flush_if_due() {
+                eprintln!("sentinel: cannot write the history: {error}");
             }
         }
         let state = Arc::new(SamplerState {
