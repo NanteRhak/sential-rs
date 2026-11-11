@@ -32,6 +32,8 @@ pub struct ProcessSample {
     pub started_at: u64,
     /// The cgroup the process belongs to, when it can be read.
     pub cgroup: Option<String>,
+    /// How many network sockets the process holds.
+    pub net_sockets: u32,
 }
 
 /// The one-letter process states reported by Linux.

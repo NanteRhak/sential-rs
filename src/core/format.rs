@@ -12,6 +12,15 @@ const UNITS: [(u64, &str); 4] = [
     (1024, "KiB"),
 ];
 
+/// One number as a share of another, as a percentage.
+pub fn percent(part: u64, whole: u64) -> f64 {
+    if whole == 0 {
+        0.0
+    } else {
+        part as f64 / whole as f64 * 100.0
+    }
+}
+
 pub fn bytes_to_human(bytes: u64) -> String {
     for (scale, unit) in UNITS {
         if bytes >= scale {
@@ -30,6 +39,12 @@ mod tests {
         assert_eq!(kb_to_bytes(0), 0);
         assert_eq!(kb_to_bytes(1), 1024);
         assert_eq!(kb_to_bytes(4096), 4_194_304);
+    }
+
+    #[test]
+    fn a_share_of_nothing_is_nothing() {
+        assert_eq!(percent(10, 0), 0.0);
+        assert_eq!(percent(25, 100), 25.0);
     }
 
     #[test]

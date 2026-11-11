@@ -5,7 +5,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/sentinel daemon --log-file /var/lib/sentinel/sentinel.log
+ExecStart=/usr/local/bin/sentinel daemon --log-file /var/lib/sentinel/sentinel.log
 User=sentinel
 Group=sentinel
 Restart=on-failure

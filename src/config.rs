@@ -401,6 +401,22 @@ impl Default for Actions {
     }
 }
 
+impl Actions {
+    /// Where the action log is written.
+    ///
+    /// Every action is written down, so there is a default place for it even
+    /// when the user has not said where it should go.
+    pub fn log_path(&self) -> Option<PathBuf> {
+        self.log_file.clone().or_else(|| {
+            let base = match std::env::var_os("XDG_STATE_HOME") {
+                Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+                _ => PathBuf::from(std::env::var_os("HOME")?).join(".local/state"),
+            };
+            Some(base.join("sentinel").join("actions.log"))
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CriticalProcesses {

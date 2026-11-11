@@ -66,13 +66,21 @@ pub struct Proposal {
     pub current_value: f64,
     /// Whether the policy may act on a protected process.
     pub allow_protected: bool,
+    /// Whether the user has to agree before the action is taken.
+    pub require_confirmation: bool,
 }
 
 /// Matches the policies against the machine.
+///
+/// shortcut: a policy matches a metric condition, not an alert that has
+/// already been raised; the alert engine owns the thresholds and the
+/// policies own the actions.
 pub struct PolicyEngine {
     policies: Vec<Policy>,
     /// When each policy last acted, so it stays quiet for its cooldown.
     fired: HashMap<String, Instant>,
+    /// When each policy's condition started holding.
+    holding_since: HashMap<String, Instant>,
 }
 
 impl PolicyEngine {
@@ -80,6 +88,7 @@ impl PolicyEngine {
         Self {
             policies,
             fired: HashMap::new(),
+            holding_since: HashMap::new(),
         }
     }
 
@@ -109,8 +118,14 @@ impl PolicyEngine {
                 continue;
             }
             let Some((process, value)) = match_process(policy, sample, processes) else {
+                self.holding_since.remove(&policy.name);
                 continue;
             };
+            // The condition has to hold for as long as the policy says.
+            let since = *self.holding_since.entry(policy.name.clone()).or_insert(now);
+            if now.duration_since(since) < policy.duration {
+                continue;
+            }
             if policy
                 .exclude
                 .iter()
@@ -130,6 +145,7 @@ impl PolicyEngine {
                 ),
                 current_value: value,
                 allow_protected: policy.allow_protected,
+                require_confirmation: policy.require_confirmation,
             });
         }
         proposals

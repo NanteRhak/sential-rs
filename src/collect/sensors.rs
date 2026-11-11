@@ -3,7 +3,7 @@
 //! Everything here is optional. A machine that exposes none of it is normal,
 //! not an error, so every reader returns what it found and nothing else.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// What the machine reports about its own hardware.
 #[derive(Debug, Clone, Default)]
@@ -168,14 +168,10 @@ impl SysFs {
     }
 }
 
-/// Whether a path exists, for tests and callers that need to check.
-pub fn exists(path: &Path) -> bool {
-    path.exists()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn fixture(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))

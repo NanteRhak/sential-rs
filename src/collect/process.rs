@@ -1,7 +1,7 @@
 //! Reading processes out of `/proc`.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::core::process::ProcessState;
@@ -280,6 +280,7 @@ pub fn process_samples(
     uptime_secs: f64,
     total_ram: u64,
     elapsed_secs: f64,
+    sockets: &HashMap<u32, u32>,
 ) -> Vec<crate::core::process::ProcessSample> {
     let before = index(previous);
     let ticks = clock_ticks();
@@ -315,7 +316,7 @@ pub fn process_samples(
                 cpu_percent,
                 mem_rss_bytes: process.rss_bytes,
                 mem_vsz_bytes: process.vsz_bytes,
-                mem_percent: percent(process.rss_bytes, total_ram),
+                mem_percent: crate::core::format::percent(process.rss_bytes, total_ram),
                 read_bytes_per_sec: read_rate,
                 write_bytes_per_sec: write_rate,
                 net_rx_bytes_per_sec: None,
@@ -329,22 +330,10 @@ pub fn process_samples(
                 ppid: process.ppid,
                 started_at: process.started_at,
                 cgroup: process.cgroup.clone(),
+                net_sockets: sockets.get(&process.pid).copied().unwrap_or(0),
             }
         })
         .collect()
-}
-
-fn percent(part: u64, whole: u64) -> f64 {
-    if whole == 0 {
-        0.0
-    } else {
-        part as f64 / whole as f64 * 100.0
-    }
-}
-
-/// The path of a process directory.
-pub fn process_dir(root: &Path, pid: u32) -> PathBuf {
-    root.join(pid.to_string())
 }
 
 #[cfg(test)]

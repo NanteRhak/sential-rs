@@ -1,7 +1,7 @@
 //! Text views: the one-screen summaries the CLI prints.
 
 use crate::collect::process::state_letter;
-use crate::core::format::bytes_to_human;
+use crate::core::format::{bytes_to_human, percent};
 use crate::core::metrics::SystemSample;
 use crate::core::process::ProcessSample;
 
@@ -372,6 +372,16 @@ pub fn report(report: &crate::report::Report) -> String {
     out
 }
 
+/// A restart loop, as it is shown.
+pub fn restart_loop_line(loop_: &crate::exits::RestartLoop) -> String {
+    format!(
+        "{} has restarted {} times in the last {}",
+        loop_.process_name,
+        loop_.count,
+        uptime(loop_.window_secs)
+    )
+}
+
 /// A proposed action, as it is shown.
 pub fn proposal_line(proposal: &crate::policy::Proposal) -> String {
     format!(
@@ -551,12 +561,14 @@ pub fn processes(processes: &[ProcessSample], protected: &[String], show_network
 pub fn network_columns(process: &ProcessSample) -> String {
     match (process.net_rx_bytes_per_sec, process.net_tx_bytes_per_sec) {
         (Some(rx), Some(tx)) => format!("{}/{}", bytes_to_human(rx), bytes_to_human(tx)),
-        _ => "n/a".to_string(),
+        // The sockets the process holds are known; the traffic through them
+        // is not, and is not guessed at.
+        _ => format!("n/a ({} sockets)", process.net_sockets),
     }
 }
 
 /// The name of a process, marked when it is protected.
-fn marked_name(process: &ProcessSample, protected: &[String]) -> String {
+pub fn marked_name(process: &ProcessSample, protected: &[String]) -> String {
     if crate::action::protection(&process.name, protected).is_some() {
         format!("{} *", process.name)
     } else {
@@ -587,14 +599,6 @@ fn rate(bytes_per_sec: u64) -> String {
 /// One `label   value` line, with the label padded to a fixed width.
 fn row(label: &str, value: &str) -> String {
     format!("  {label:<LABEL$}{value}\n", LABEL = LABEL)
-}
-
-fn percent(part: u64, whole: u64) -> f64 {
-    if whole == 0 {
-        0.0
-    } else {
-        part as f64 / whole as f64 * 100.0
-    }
 }
 
 fn join_percent(values: &[f64]) -> String {

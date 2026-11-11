@@ -1,7 +1,7 @@
 //! Parsers and readers for the `/proc` files the sampler needs.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::{
     CpuCounters, CpuTimes, DiskCounters, MemoryCounters, NetworkCounters, PressureCounters,
@@ -28,6 +28,11 @@ impl ProcFs {
 
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
+    }
+
+    /// The root of the proc filesystem.
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
     }
 
     fn read(&self, path: &str) -> Option<String> {
@@ -355,6 +360,7 @@ pub struct ProcCollector {
     fs: ProcFs,
     sys: super::sensors::SysFs,
     include_loopback: bool,
+    sampling: crate::config::Sampling,
 }
 
 impl Default for ProcCollector {
@@ -369,7 +375,14 @@ impl ProcCollector {
             fs,
             sys: super::sensors::SysFs::system(),
             include_loopback,
+            sampling: crate::config::Sampling::default(),
         }
+    }
+
+    /// Collect only what the configuration asks for.
+    pub fn with_sampling(mut self, sampling: crate::config::Sampling) -> Self {
+        self.sampling = sampling;
+        self
     }
 
     /// Read the sensors from somewhere other than the real `/sys`.
@@ -388,22 +401,34 @@ impl super::Collector for ProcCollector {
             at: std::time::Instant::now(),
             cpu,
             memory,
-            disk: self.fs.disk_counters(),
-            network: self.fs.network_counters(self.include_loopback),
+            disk: if self.sampling.disk {
+                self.fs.disk_counters()
+            } else {
+                Default::default()
+            },
+            network: if self.sampling.network {
+                self.fs.network_counters(self.include_loopback)
+            } else {
+                Default::default()
+            },
             load_avg: self.fs.load_avg().unwrap_or_default(),
             pressure: self.fs.pressure(),
             filesystems,
             notes,
-            sensors: self.sys.readings(),
+            sensors: if self.sampling.temperature {
+                self.sys.readings()
+            } else {
+                Default::default()
+            },
             processes: self.fs.processes(),
             uptime_secs: self.fs.uptime(),
+            sockets: if self.sampling.process_network {
+                super::net::socket_counts(self.fs.root())
+            } else {
+                Default::default()
+            },
         })
     }
-}
-
-/// The name of a file below the proc root, for error messages.
-pub fn proc_path(root: &Path, name: &str) -> PathBuf {
-    root.join(name)
 }
 
 #[cfg(test)]

@@ -15,9 +15,7 @@ use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-use crate::collect::proc::ProcCollector;
 use crate::config::Config;
-use crate::sample::Sampler;
 
 use crate::policy::PolicyAction;
 use crate::view::Sort;
@@ -26,7 +24,9 @@ use app::{App, Menu};
 
 /// Run the dashboard until the user quits.
 pub fn run(config: Config) -> Result<(), String> {
-    let mut sampler = Sampler::new(config.general.interval, Box::new(ProcCollector::default()))
+    // The dashboard shows the alerts in its own pane, so it must not print
+    // them as well.
+    let mut sampler = crate::commands::sampler(&config, config.general.interval, Box::new(|_| {}))
         .with_history(config.general.history_duration);
     let state = sampler.handle();
     let stop = Arc::new(AtomicBool::new(false));

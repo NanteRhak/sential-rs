@@ -39,11 +39,6 @@ fn kernel_log() -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// Whether the OOM killer is likely to have taken a process.
-pub fn likely(pid: u32) -> bool {
-    evidence_for(pid).is_some()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,7 +69,9 @@ mod tests {
     #[test]
     fn a_log_that_cannot_be_read_says_nothing() {
         // There is no kernel log to read in most build environments, and that
-        // must not be an error.
-        let _ = evidence_for(42);
+        // must not be an error: the tool says nothing rather than guessing.
+        if std::process::Command::new("dmesg").output().is_err() {
+            assert!(evidence_for(42).is_none());
+        }
     }
 }

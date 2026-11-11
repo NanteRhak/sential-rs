@@ -33,6 +33,8 @@ pub struct RawSnapshot {
     pub sensors: sensors::SensorReadings,
     pub processes: Vec<process::ProcessCounters>,
     pub uptime_secs: f64,
+    /// How many network sockets each process holds, when it was looked for.
+    pub sockets: HashMap<u32, u32>,
 }
 
 impl Default for RawSnapshot {
@@ -50,6 +52,7 @@ impl Default for RawSnapshot {
             sensors: sensors::SensorReadings::default(),
             processes: Vec::new(),
             uptime_secs: 0.0,
+            sockets: HashMap::new(),
         }
     }
 }

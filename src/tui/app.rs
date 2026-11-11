@@ -192,7 +192,7 @@ impl App {
 
     /// Write an action to the action log, the same log the CLI writes to.
     fn record(&mut self, action: &str, pid: u32, process_name: &str, reason: &str, result: &str) {
-        let Some(path) = &self.config.actions.log_file else {
+        let Some(path) = &self.config.actions.log_path() else {
             return;
         };
         let record = action::ActionRecord {
@@ -384,7 +384,8 @@ impl App {
         let state = self.snapshot();
         let exits = &state.exits;
         let alerts = &state.alerts;
-        if alerts.is_empty() && exits.is_empty() {
+        let loops = &state.restart_loops;
+        if alerts.is_empty() && exits.is_empty() && loops.is_empty() {
             frame.render_widget(Paragraph::new("no alerts").block(block), area);
             return;
         }
@@ -411,6 +412,12 @@ impl App {
             lines.push(Line::from(vec![
                 Span::styled("[EXIT] ", Style::default().fg(Color::Magenta)),
                 Span::raw(crate::view::exit_line(exit)),
+            ]));
+        }
+        for loop_ in loops.iter().rev().take(1) {
+            lines.push(Line::from(vec![
+                Span::styled("[RESTART] ", Style::default().fg(Color::Red)),
+                Span::raw(crate::view::restart_loop_line(loop_)),
             ]));
         }
         frame.render_widget(Paragraph::new(lines).block(block), area);
@@ -543,7 +550,10 @@ impl App {
                     Cell::from(process.user.clone()),
                     Cell::from(format!("{:.1}", process.cpu_percent)),
                     Cell::from(format!("{:.1}", process.mem_percent)),
-                    Cell::from(marked_name(process, &self.config.critical_processes.names)),
+                    Cell::from(crate::view::marked_name(
+                        process,
+                        &self.config.critical_processes.names,
+                    )),
                 ])
                 .style(style)
             })
@@ -581,6 +591,12 @@ impl App {
         };
         let mut lines: Vec<Line> = vec![
             Line::from(format!("{} ({})", process.name, process.pid)),
+            Line::from(format!(
+                "parent {}  user {}  started {}",
+                process.ppid,
+                process.user,
+                crate::view::clock(process.started_at)
+            )),
             Line::from(format!(
                 "cmd {}",
                 if process.cmd.is_empty() {
@@ -683,15 +699,6 @@ pub fn network_series(history: &[Arc<SamplerState>]) -> Vec<u64> {
         .iter()
         .map(|state| state.system.network.rx_bytes_per_sec + state.system.network.tx_bytes_per_sec)
         .collect()
-}
-
-/// The name of a process, marked when it is protected.
-fn marked_name(process: &ProcessSample, protected: &[String]) -> String {
-    if crate::action::protection(&process.name, protected).is_some() {
-        format!("{} *", process.name)
-    } else {
-        process.name.clone()
-    }
 }
 
 /// Whether a process is using the resource the table is narrowed to.

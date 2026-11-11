@@ -34,7 +34,7 @@ pub fn socket_inodes(root: &Path) -> HashSet<u64> {
 ///
 /// This is the expensive part of the attribution: every file descriptor of
 /// every process has to be looked at.
-pub fn socket_counts(root: &Path) -> HashMap<u32, usize> {
+pub fn socket_counts(root: &Path) -> HashMap<u32, u32> {
     let sockets = socket_inodes(root);
     let mut counts = HashMap::new();
     for pid in crate::collect::process::pids(root) {
@@ -45,7 +45,7 @@ pub fn socket_counts(root: &Path) -> HashMap<u32, usize> {
         let count = entries
             .filter_map(|entry| entry.ok())
             .filter(|entry| is_socket(entry, &sockets))
-            .count();
+            .count() as u32;
         if count > 0 {
             counts.insert(pid, count);
         }
@@ -100,9 +100,11 @@ mod tests {
     #[test]
     fn the_socket_count_is_read_without_failing() {
         // There may be no sockets at all in a container, but the call must
-        // not fail either way.
+        // not fail either way, and every count must belong to a process.
         let counts = socket_counts(Path::new("/proc"));
-        let _ = counts.get(&std::process::id());
+        for (pid, count) in &counts {
+            assert!(*count > 0, "process {pid} was counted with no sockets");
+        }
     }
 
     #[test]

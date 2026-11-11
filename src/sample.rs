@@ -37,6 +37,13 @@ pub struct SamplerState {
 /// What happens when an alert is raised.
 pub type AlertSink = Box<dyn Fn(&Alert) + Send>;
 
+/// Keep the newest items of a list, dropping the oldest.
+fn keep_the_newest<T>(items: &mut Vec<T>, wanted: usize) {
+    if items.len() > wanted {
+        items.drain(..items.len() - wanted);
+    }
+}
+
 /// The state the sampler publishes, shared with the readers.
 pub struct Shared {
     state: RwLock<Arc<SamplerState>>,
@@ -236,20 +243,24 @@ impl Sampler {
             reading.uptime_secs,
             reading.memory.total_bytes,
             elapsed,
+            &reading.sockets,
         );
         self.previous = Some(reading);
 
+        // The engine only raises an alert once; the list keeps them all, so
+        // the view can show the recent ones.
         let mut alerts = self.state().alerts.clone();
         if let Some(engine) = self.alerts.as_mut() {
-            alerts.extend(engine.evaluate(&system, &processes, Instant::now()));
+            let raised = engine.evaluate(&system, &processes, Instant::now());
             if let Some(on_alert) = &self.on_alert {
-                for alert in &alerts {
+                for alert in &raised {
                     on_alert(alert);
                 }
             }
+            alerts.extend(raised);
         }
 
-        alerts.truncate(50);
+        keep_the_newest(&mut alerts, 50);
         let mut processes = processes;
         crate::pressure::apply_scores(
             &mut processes,
@@ -259,7 +270,7 @@ impl Sampler {
 
         let mut exits = self.state().exits.clone();
         exits.extend(self.tracker.observe(&processes));
-        exits.truncate(50);
+        keep_the_newest(&mut exits, 50);
         let restart_loops = self.tracker.restart_loops();
         let proposals = match self.policies.as_mut() {
             Some(engine) => engine.propose(&system, &processes, Instant::now()),
@@ -454,6 +465,40 @@ mod tests {
 
         // Five or six ticks fit in 550ms at 100ms a tick.
         assert!((3..=8).contains(&ticks), "{ticks} ticks in 550ms");
+    }
+
+    #[test]
+    fn an_alert_is_reported_once_and_not_again_on_every_tick() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let counter = count.clone();
+        let rule = crate::config::AlertRule {
+            name: "always".to_string(),
+            metric: "cpu_percent".to_string(),
+            condition: crate::config::Condition::Above,
+            threshold: -1.0,
+            duration: Duration::from_secs(0),
+            severity: crate::core::Severity::Warning,
+            message: "the cpu is above -1".to_string(),
+            enabled: true,
+            cooldown: Duration::from_secs(300),
+            spike: None,
+        };
+        let mut sampler = Sampler::new(
+            Duration::from_millis(1),
+            Box::new(FakeCollector::new(vec![])),
+        )
+        .with_alerts(
+            crate::alert::AlertEngine::new(vec![rule]),
+            Box::new(move |_| {
+                counter.fetch_add(1, Ordering::Relaxed);
+            }),
+        );
+
+        for _ in 0..5 {
+            sampler.tick();
+        }
+
+        assert_eq!(count.load(Ordering::Relaxed), 1);
     }
 
     #[test]

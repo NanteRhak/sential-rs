@@ -27,7 +27,9 @@ pub enum AlertCategory {
 impl AlertCategory {
     /// The category a metric belongs to.
     pub fn of(metric: &str) -> AlertCategory {
-        let metric = metric.trim_start_matches("process_");
+        if metric.starts_with("process_") {
+            return AlertCategory::Process;
+        }
         if metric.contains("cpu") {
             AlertCategory::Cpu
         } else if metric.contains("memory") || metric.contains("swap") {
@@ -38,8 +40,6 @@ impl AlertCategory {
             AlertCategory::Network
         } else if metric.contains("temperature") {
             AlertCategory::Temperature
-        } else if metric.starts_with("process") {
-            AlertCategory::Process
         } else {
             AlertCategory::System
         }
@@ -219,19 +219,7 @@ impl AlertEngine {
 
 /// Append an alert to the log file, one JSON object per line.
 pub fn append_alert(path: &Path, alert: &Alert) -> Result<(), String> {
-    use std::io::Write;
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-    let line = serde_json::to_string(alert).map_err(|error| error.to_string())?;
-    writeln!(file, "{line}").map_err(|error| format!("{}: {error}", path.display()))
+    crate::store::append_json(path, alert)
 }
 
 /// Read the alerts from the log file, oldest first.
@@ -245,6 +233,48 @@ pub fn read_alerts(path: &Path) -> Vec<Alert> {
     text.lines()
         .filter_map(|line| serde_json::from_str::<Alert>(line).ok())
         .collect()
+}
+
+/// The rules the thresholds imply, used when the config has none of its own.
+pub fn default_rules(thresholds: &crate::config::Thresholds) -> Vec<AlertRule> {
+    let rule = |name: &str, metric: &str, threshold: f64, severity: Severity| AlertRule {
+        name: name.to_string(),
+        metric: metric.to_string(),
+        condition: Condition::Above,
+        threshold,
+        duration: std::time::Duration::from_secs(5),
+        severity,
+        message: format!("{metric} has been over {threshold} for five seconds"),
+        enabled: true,
+        cooldown: std::time::Duration::from_secs(300),
+        spike: None,
+    };
+    vec![
+        rule(
+            "high-cpu",
+            "cpu_percent",
+            thresholds.cpu_percent,
+            Severity::Warning,
+        ),
+        rule(
+            "high-memory",
+            "memory_percent",
+            thresholds.memory_percent,
+            Severity::Warning,
+        ),
+        rule(
+            "high-temperature",
+            "temperature_celsius",
+            thresholds.temperature_celsius,
+            Severity::Critical,
+        ),
+        rule(
+            "full-disk",
+            "disk_usage_percent",
+            thresholds.disk_usage_percent,
+            Severity::Warning,
+        ),
+    ]
 }
 
 /// The value of a named metric, and the process it belongs to.
@@ -276,16 +306,10 @@ pub fn metric_value(
         "cpu_percent" => sample.cpu.total_percent,
         "load_avg_1" => sample.cpu.load_avg_1,
         "memory_percent" => {
-            if sample.memory.total_bytes == 0 {
-                return None;
-            }
-            sample.memory.used_bytes as f64 / sample.memory.total_bytes as f64 * 100.0
+            crate::core::format::percent(sample.memory.used_bytes, sample.memory.total_bytes)
         }
         "available_memory_percent" => {
-            if sample.memory.total_bytes == 0 {
-                return None;
-            }
-            sample.memory.available_bytes as f64 / sample.memory.total_bytes as f64 * 100.0
+            crate::core::format::percent(sample.memory.available_bytes, sample.memory.total_bytes)
         }
         "swap_percent" => {
             if sample.memory.swap_total_bytes == 0 {
@@ -299,11 +323,7 @@ pub fn metric_value(
             .filesystems
             .iter()
             .map(|filesystem| {
-                if filesystem.total_bytes == 0 {
-                    0.0
-                } else {
-                    filesystem.used_bytes as f64 / filesystem.total_bytes as f64 * 100.0
-                }
+                crate::core::format::percent(filesystem.used_bytes, filesystem.total_bytes)
             })
             .fold(0.0, f64::max),
         "disk_read_bytes_per_sec" => sample.disk.read_bytes_per_sec as f64,
@@ -311,13 +331,17 @@ pub fn metric_value(
         "network_bytes_per_sec" => {
             (sample.network.rx_bytes_per_sec + sample.network.tx_bytes_per_sec) as f64
         }
-        "temperature_celsius" => sample
-            .sensors
-            .temperatures
-            .iter()
-            .map(|reading| reading.celsius)
-            .fold(f64::MIN, f64::max)
-            .max(f64::MIN),
+        // A machine with no readable sensor has no temperature to report.
+        "temperature_celsius" => {
+            let peak = sample
+                .sensors
+                .temperatures
+                .iter()
+                .map(|reading| reading.celsius)
+                .fold(f64::MIN, f64::max);
+            // A machine with no readable sensor has no temperature to report.
+            if peak == f64::MIN { 0.0 } else { peak }
+        }
         _ => return None,
     };
     Some((value, None, None))

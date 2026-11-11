@@ -55,19 +55,7 @@ pub fn protection(name: &str, protected: &[String]) -> Option<String> {
 
 /// Append an action to the action log, one JSON object per line.
 pub fn write_record(path: &Path, record: &ActionRecord) -> Result<(), String> {
-    use std::io::Write;
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-    let line = serde_json::to_string(record).map_err(|error| error.to_string())?;
-    writeln!(file, "{line}").map_err(|error| format!("{}: {error}", path.display()))
+    crate::store::append_json(path, record)
 }
 
 /// Read the action log, oldest first.
@@ -119,6 +107,12 @@ impl Executor {
             && !allow_protected
         {
             record.result = format!("refused: protected by the {rule} rule");
+            self.write(&record);
+            return record.result.clone();
+        }
+
+        if proposal.require_confirmation {
+            record.result = "waiting for confirmation".to_string();
             self.write(&record);
             return record.result.clone();
         }
@@ -214,11 +208,6 @@ pub fn renice(pid: u32, value: i32) -> Result<(), String> {
     Ok(())
 }
 
-/// Where the action log is written.
-pub fn log_path(configured: Option<&PathBuf>) -> Option<PathBuf> {
-    configured.cloned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +262,7 @@ mod tests {
             reason: "the policy matched".into(),
             current_value: 90.0,
             allow_protected: false,
+            require_confirmation: false,
         }
     }
 

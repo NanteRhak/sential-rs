@@ -43,11 +43,6 @@ impl<T> Ring<T> {
         }
     }
 
-    /// The items, oldest first.
-    pub fn items(&self) -> impl Iterator<Item = &T> {
-        self.items.iter().map(|(_, item)| item)
-    }
-
     /// The items, oldest first, as owned values.
     pub fn to_vec(&self) -> Vec<&T> {
         self.items.iter().map(|(_, item)| item).collect()

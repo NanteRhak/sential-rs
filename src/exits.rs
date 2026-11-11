@@ -41,7 +41,8 @@ impl ExitRecord {
             }
             (None, None) => {
                 "disappeared without being seen as a zombie, so it was probably killed".to_string()
-            }
+            } // The kernel only tells the parent of a process what its exit
+              // code was, and this tool is not the parent.
         }
     }
 }

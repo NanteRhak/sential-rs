@@ -56,7 +56,7 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
 
 fn health(config: Config, interval: Option<String>, loopback: bool) -> Result<(), String> {
     let interval = resolve_interval(interval, config.general.interval)?;
-    let mut sampler = sampler(&config, interval);
+    let mut sampler = sampler(&config, interval, print_alerts(&config));
     if loopback {
         sampler = sampler.with_collector(Box::new(ProcCollector::new(
             crate::collect::proc::ProcFs::system(),
@@ -125,7 +125,11 @@ fn top(config: Config, json: bool) -> Result<(), String> {
 
 /// A sampler that watches the configured rules and prints the alerts it
 /// raises as they happen.
-pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
+pub fn sampler(
+    config: &Config,
+    interval: std::time::Duration,
+    on_alert: crate::sample::AlertSink,
+) -> Sampler {
     let mut sampler = Sampler::new(interval, Box::new(ProcCollector::default()))
         .with_history(config.general.history_duration)
         .with_detection(
@@ -138,19 +142,14 @@ pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
             config.policies.rules.clone(),
         ));
 
-    if config.alerts.enabled && !config.alerts.rules.is_empty() {
-        let log_file = config.alerts.log_file.clone();
-        sampler = sampler.with_alerts(
-            AlertEngine::new(config.alerts.rules.clone()),
-            Box::new(move |alert| {
-                println!("{}", view::alert_line(alert));
-                if let Some(path) = &log_file
-                    && let Err(error) = append_alert(path, alert)
-                {
-                    eprintln!("sentinel: {error}");
-                }
-            }),
-        );
+    if config.alerts.enabled {
+        // The thresholds are the rules the user did not write themselves.
+        let rules = if config.alerts.rules.is_empty() {
+            crate::alert::default_rules(&config.thresholds)
+        } else {
+            config.alerts.rules.clone()
+        };
+        sampler = sampler.with_alerts(AlertEngine::new(rules), on_alert);
     }
 
     if config.general.persist_history
@@ -380,7 +379,7 @@ fn record_action(
     reason: &str,
     result: &str,
 ) {
-    let Some(path) = &config.actions.log_file else {
+    let Some(path) = &config.actions.log_path() else {
         return;
     };
     let record = crate::action::ActionRecord {
@@ -411,7 +410,7 @@ fn watch(config: Config, interval: Option<String>, duration: Option<String>) -> 
         describe_interval(interval)
     );
 
-    let mut sampler = sampler(&config, interval);
+    let mut sampler = sampler(&config, interval, print_alerts(&config));
     let deadline = limit.map(|limit| std::time::Instant::now() + limit);
     let stop = || {
         crate::interrupt::requested()
@@ -426,6 +425,9 @@ fn watch(config: Config, interval: Option<String>, duration: Option<String>) -> 
         seen_exits.set(state.exits.len());
         for proposal in &state.proposals {
             println!("[policy] {}", view::proposal_line(proposal));
+        }
+        for loop_ in &state.restart_loops {
+            println!("[restart] {}", view::restart_loop_line(loop_));
         }
     });
     sampler.flush_history();
@@ -461,11 +463,13 @@ fn daemon(
     crate::interrupt::ignore_hangup();
 
     let interval = config.general.interval;
-    let mut sampler = sampler(&config, interval).with_executor(crate::action::Executor::new(
-        config.critical_processes.names.clone(),
-        config.actions.log_file.clone(),
-        config.policies.dry_run,
-    ));
+    let mut sampler = sampler(&config, interval, print_alerts(&config)).with_executor(
+        crate::action::Executor::new(
+            config.critical_processes.names.clone(),
+            config.actions.log_path(),
+            config.policies.dry_run,
+        ),
+    );
 
     let log_file = log_file
         .map(std::path::PathBuf::from)
@@ -482,11 +486,7 @@ fn daemon(
     };
     sampler.run_with(&stop, &|state| {
         let memory = &state.system.memory;
-        let memory_percent = if memory.total_bytes == 0 {
-            0.0
-        } else {
-            memory.used_bytes as f64 / memory.total_bytes as f64 * 100.0
-        };
+        let memory_percent = crate::core::format::percent(memory.used_bytes, memory.total_bytes);
         let line = format!(
             "tick {} cpu {:.1}% mem {:.1}% processes {}",
             state.tick,
@@ -591,6 +591,19 @@ fn default_data_dir() -> Option<std::path::PathBuf> {
     Some(base.join("sentinel"))
 }
 
+/// A sink that prints the alerts and writes them to the log.
+pub fn print_alerts(config: &Config) -> crate::sample::AlertSink {
+    let log_file = config.alerts.log_file.clone();
+    Box::new(move |alert| {
+        println!("{}", view::alert_line(alert));
+        if let Some(path) = &log_file
+            && let Err(error) = append_alert(path, alert)
+        {
+            eprintln!("sentinel: {error}");
+        }
+    })
+}
+
 /// The alerts of the last window, read back from the log file.
 fn alerts(config: Config, last: Option<String>) -> Result<(), String> {
     let window = match last {
@@ -616,7 +629,7 @@ fn alerts(config: Config, last: Option<String>) -> Result<(), String> {
 
 /// Two readings one interval apart, so the per-process rates are meaningful.
 fn sample_processes(config: &Config) -> Result<Vec<crate::core::process::ProcessSample>, String> {
-    let mut sampler = sampler(config, config.general.interval);
+    let mut sampler = sampler(config, config.general.interval, print_alerts(config));
     let state = sampler.warm_sample();
     if let Some(error) = sampler.last_error() {
         return Err(format!("cannot read system metrics: {error}"));

@@ -20,7 +20,7 @@ the plan has landed.
 - **Process view** — CPU%, RSS/VSZ, per-process disk I/O, thread and file-descriptor counts, state, user, cgroup. Sortable by any resource and by a combined resource pressure score.
 - **Anomaly detection** — configurable threshold rules, spike detection against moving baselines, unexpected-exit and restart-loop detection, OOM-killer evidence, and millisecond-level sampling with a ring buffer of recent high-resolution metrics.
 - **Alerts** — severity, category, current value against threshold, suggested action. Shown on the terminal, written to a log file, listed in the TUI.
-- **Resource control** — kill, signal, suspend, resume, renice, I/O priority, CPU affinity and cgroup limits. Dry-run by default, confirmation on destructive actions, protected processes never auto-killed, every action audited.
+- **Resource control** — kill, signal, suspend, resume, renice and cgroup limits. Every action asks first, protected processes are never killed automatically, and every action is written down.
 - **Interfaces** — a CLI for scripting, a TUI for watching, and a daemon mode for running unattended.
 
 ## Commands

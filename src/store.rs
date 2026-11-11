@@ -28,6 +28,23 @@ pub struct StoredProcess {
     pub mem_percent: f64,
 }
 
+/// Append a value to a file, one JSON object per line.
+pub fn append_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    use std::io::Write;
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("{}: {error}", path.display()))?;
+    let line = serde_json::to_string(value).map_err(|error| error.to_string())?;
+    writeln!(file, "{line}").map_err(|error| format!("{}: {error}", path.display()))
+}
+
 /// The history file.
 pub struct Store {
     path: PathBuf,
@@ -59,20 +76,7 @@ impl Store {
     /// The write is one line, so it is cheap; the caller decides how often to
     /// write at all.
     pub fn append(&self, sample: &StoredSample) -> Result<(), String> {
-        use std::io::Write;
-        if let Some(parent) = self.path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|error| format!("{}: {error}", self.path.display()))?;
-        let line = serde_json::to_string(sample).map_err(|error| error.to_string())?;
-        writeln!(file, "{line}").map_err(|error| format!("{}: {error}", self.path.display()))?;
-        drop(file);
+        append_json(&self.path, sample)?;
         self.trim()
     }
 
@@ -126,11 +130,7 @@ impl StoredSample {
         processes: &[crate::core::process::ProcessSample],
     ) -> StoredSample {
         let memory = &sample.memory;
-        let memory_percent = if memory.total_bytes == 0 {
-            0.0
-        } else {
-            memory.used_bytes as f64 / memory.total_bytes as f64 * 100.0
-        };
+        let memory_percent = crate::core::format::percent(memory.used_bytes, memory.total_bytes);
         let mut processes: Vec<StoredProcess> = processes
             .iter()
             .map(|process| StoredProcess {
