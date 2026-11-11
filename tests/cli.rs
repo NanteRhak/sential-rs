@@ -62,6 +62,16 @@ fn health_prints_the_disk_row() {
 }
 
 #[test]
+fn health_prints_the_network_row() {
+    let out = sentinel(&["health", "--interval", "50ms"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(stdout.contains("Network"), "output: {stdout}");
+    assert!(stdout.contains("Packets"), "output: {stdout}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 

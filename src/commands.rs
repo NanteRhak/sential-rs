@@ -11,7 +11,7 @@ use crate::view;
 /// Run one command. `Err` is a message for the user and a non-zero exit.
 pub fn run(command: Command, config: Config) -> Result<(), String> {
     match command {
-        Command::Health { interval } => health(config, interval),
+        Command::Health { interval, loopback } => health(config, interval, loopback),
         Command::Ps => Err("ps is not implemented yet".into()),
         Command::Top => Err("top is not implemented yet".into()),
         Command::Tui => Err("tui is not implemented yet".into()),
@@ -27,14 +27,15 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
     }
 }
 
-fn health(config: Config, interval: Option<String>) -> Result<(), String> {
+fn health(config: Config, interval: Option<String>, loopback: bool) -> Result<(), String> {
     let interval = resolve_interval(interval, config.general.interval)?;
-    let mut sampler = Sampler::new(interval, Box::new(ProcCollector::default()));
+    let collector = ProcCollector::new(crate::collect::proc::ProcFs::system(), loopback);
+    let mut sampler = Sampler::new(interval, Box::new(collector));
     let state = sampler.warm_sample();
     if let Some(error) = sampler.last_error() {
         return Err(format!("cannot read system metrics: {error}"));
     }
-    print!("{}", view::health(&state.system));
+    print!("{}", view::health(&state.system, config.ui.show_network));
     Ok(())
 }
 

@@ -76,10 +76,17 @@ impl ProcFs {
         (filesystems, notes)
     }
 
-    pub fn network_counters(&self) -> HashMap<String, NetworkCounters> {
-        self.read("net/dev")
+    /// Counters per interface. Loopback is left out unless it is asked for:
+    /// its traffic is the machine talking to itself.
+    pub fn network_counters(&self, include_loopback: bool) -> HashMap<String, NetworkCounters> {
+        let mut interfaces = self
+            .read("net/dev")
             .map(|text| parse_netdev(&text))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if !include_loopback {
+            interfaces.remove("lo");
+        }
+        interfaces
     }
 
     pub fn pressure(&self) -> Option<PressureCounters> {
@@ -314,17 +321,21 @@ pub fn parse_pressure(text: &str) -> Option<PressureCounters> {
 /// Reads the whole machine at every tick.
 pub struct ProcCollector {
     fs: ProcFs,
+    include_loopback: bool,
 }
 
 impl Default for ProcCollector {
     fn default() -> Self {
-        Self::new(ProcFs::system())
+        Self::new(ProcFs::system(), false)
     }
 }
 
 impl ProcCollector {
-    pub fn new(fs: ProcFs) -> Self {
-        Self { fs }
+    pub fn new(fs: ProcFs, include_loopback: bool) -> Self {
+        Self {
+            fs,
+            include_loopback,
+        }
     }
 }
 
@@ -338,7 +349,7 @@ impl super::Collector for ProcCollector {
             cpu,
             memory,
             disk: self.fs.disk_counters(),
-            network: self.fs.network_counters(),
+            network: self.fs.network_counters(self.include_loopback),
             load_avg: self.fs.load_avg().unwrap_or_default(),
             pressure: self.fs.pressure(),
             filesystems,

@@ -20,6 +20,9 @@ pub enum Command {
         /// Sampling interval for this run, for example 500ms or 2s
         #[arg(long, value_name = "DURATION")]
         interval: Option<String>,
+        /// Count loopback traffic in the network totals
+        #[arg(long)]
+        loopback: bool,
     },
     /// List processes, sortable by resource usage
     Ps,

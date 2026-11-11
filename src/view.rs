@@ -6,7 +6,7 @@ use crate::core::metrics::SystemSample;
 const LABEL: usize = 18;
 
 /// The `sentinel health` screen.
-pub fn health(sample: &SystemSample) -> String {
+pub fn health(sample: &SystemSample, show_network: bool) -> String {
     let mut out = String::new();
     out.push_str("CPU\n");
     out.push_str(&row(
@@ -68,6 +68,55 @@ pub fn health(sample: &SystemSample) -> String {
     ));
     out.push('\n');
     out.push_str(&disk_section(sample));
+    if show_network {
+        out.push('\n');
+        out.push_str(&network_section(sample));
+    }
+    out
+}
+
+/// The network row: throughput, packet rate, errors and drops.
+fn network_section(sample: &SystemSample) -> String {
+    let network = &sample.network;
+    let mut out = String::new();
+    out.push_str("Network\n");
+    out.push_str(&row(
+        "Throughput",
+        &format!(
+            "received {}  sent {}",
+            rate(network.rx_bytes_per_sec),
+            rate(network.tx_bytes_per_sec)
+        ),
+    ));
+    out.push_str(&row(
+        "Packets",
+        &format!(
+            "{}/s received  {}/s sent",
+            network.rx_packets_per_sec, network.tx_packets_per_sec
+        ),
+    ));
+    out.push_str(&row(
+        "Errors",
+        &format!("{}  drops {}", network.errors_total, network.drops_total),
+    ));
+    if network.interfaces.is_empty() {
+        out.push_str(&row("Interfaces", "no interfaces reported"));
+    } else {
+        for interface in &network.interfaces {
+            out.push_str(&row(
+                &format!("Interface {}", interface.name),
+                &format!(
+                    "received {}  sent {}  {}/s in  {}/s out  errors {}  drops {}",
+                    rate(interface.rx_bytes_per_sec),
+                    rate(interface.tx_bytes_per_sec),
+                    interface.rx_packets_per_sec,
+                    interface.tx_packets_per_sec,
+                    interface.errors_total,
+                    interface.drops_total
+                ),
+            ));
+        }
+    }
     out
 }
 
@@ -190,7 +239,7 @@ mod tests {
             ..Default::default()
         };
 
-        let text = health(&sample);
+        let text = health(&sample, true);
 
         assert!(text.contains("CPU"), "{text}");
         assert!(text.contains("Memory"), "{text}");
@@ -230,7 +279,7 @@ mod tests {
             ..Default::default()
         };
 
-        let text = health(&sample);
+        let text = health(&sample, true);
 
         assert!(text.contains("Disk"), "{text}");
         assert!(text.contains("Throughput"), "{text}");
@@ -242,8 +291,48 @@ mod tests {
     }
 
     #[test]
+    fn the_network_rows_carry_the_expected_labels() {
+        let sample = SystemSample {
+            network: crate::core::metrics::NetworkSample {
+                rx_bytes_per_sec: 1024,
+                tx_bytes_per_sec: 2048,
+                rx_packets_per_sec: 10,
+                tx_packets_per_sec: 20,
+                errors_total: 3,
+                drops_total: 4,
+                interfaces: vec![crate::core::metrics::InterfaceSample {
+                    name: "eth0".into(),
+                    rx_bytes_per_sec: 1024,
+                    tx_bytes_per_sec: 2048,
+                    rx_packets_per_sec: 10,
+                    tx_packets_per_sec: 20,
+                    errors_total: 3,
+                    drops_total: 4,
+                }],
+            },
+            ..Default::default()
+        };
+
+        let text = health(&sample, true);
+
+        assert!(text.contains("Network"), "{text}");
+        assert!(text.contains("Throughput"), "{text}");
+        assert!(text.contains("Packets"), "{text}");
+        assert!(text.contains("Errors"), "{text}");
+        assert!(text.contains("Interface eth0"), "{text}");
+        assert!(text.contains("10/s received"), "{text}");
+    }
+
+    #[test]
+    fn the_network_row_can_be_left_out() {
+        let text = health(&SystemSample::default(), false);
+
+        assert!(!text.contains("Network"), "{text}");
+    }
+
+    #[test]
     fn a_machine_with_no_cores_says_so() {
-        let text = health(&SystemSample::default());
+        let text = health(&SystemSample::default(), true);
 
         assert!(text.contains("no cores reported"), "{text}");
     }
