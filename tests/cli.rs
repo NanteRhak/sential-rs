@@ -37,3 +37,26 @@ fn version_is_printed() {
         "version output: {stdout}"
     );
 }
+
+#[test]
+fn broken_local_config_fails_before_running_the_command() {
+    let dir = std::env::temp_dir().join(format!("sentinel-cli-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sentinel.toml"),
+        "[general]\ninterval = \"fast\"\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .arg("health")
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(!out.status.success(), "exit status: {:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("general.interval"), "stderr: {stderr}");
+    assert!(stderr.contains("sentinel.toml"), "stderr: {stderr}");
+}

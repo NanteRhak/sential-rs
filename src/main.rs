@@ -42,7 +42,12 @@ enum Command {
 }
 
 fn main() {
-    match Cli::parse().command {
+    let command = Cli::parse().command;
+    if let Err(error) = sentinel::config::Config::load() {
+        eprintln!("sentinel: {error}");
+        std::process::exit(1);
+    }
+    match command {
         Command::Health => not_implemented("health"),
         Command::Ps => not_implemented("ps"),
         Command::Top => not_implemented("top"),

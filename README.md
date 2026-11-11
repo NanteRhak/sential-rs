@@ -44,6 +44,35 @@ A lightweight, fast system monitor for Linux, written in Rust — htop's view of
 - Lightweight: low CPU, bounded memory, no database server, no browser.
 - Linux first, metrics read from `/proc` and `/sys`.
 
+## Configuration
+
+`sentinel` reads `./sentinel.toml` if it exists, otherwise
+`$XDG_CONFIG_HOME/sentinel/config.toml` (`~/.config/sentinel/config.toml` by default),
+otherwise built-in defaults. A `~` in a path is expanded to your home directory.
+
+```toml
+[general]
+interval = "1s"
+history_duration = "10m"
+persist_history = true
+data_dir = "~/.local/share/rust-system-sentinel"
+
+[thresholds]
+cpu_percent = 90
+memory_percent = 90
+temperature_celsius = 85
+disk_usage_percent = 90
+
+[critical_processes]
+names = ["systemd", "sshd", "init"]
+```
+
+On weak hardware, set `profile = "low-resource"` (or `low_resource_mode = true`). It
+forces an interval of at least 2 seconds, caps history at one minute, disables
+persistence, and turns off the per-process I/O and network collectors.
+
+An invalid config is refused at startup with the offending key and line number.
+
 ## Building
 
 The Cargo project is created in ticket 01. Once it lands:

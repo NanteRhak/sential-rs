@@ -135,7 +135,7 @@ impl Default for Alerts {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct CriticalProcesses {
     pub names: Vec<String>,
 }
@@ -145,8 +145,36 @@ impl Config {
     pub fn from_toml(text: &str) -> Result<Config, ConfigError> {
         let mut config: Config =
             toml::from_str(text).map_err(|e| ConfigError::parse(describe_error(text, &e)))?;
+        config.general.data_dir = expand_home(config.general.data_dir);
+        config.alerts.log_file = expand_home(config.alerts.log_file);
         config.apply_profile();
+        config.validate()?;
         Ok(config)
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        for (key, value) in [
+            ("thresholds.cpu_percent", self.thresholds.cpu_percent),
+            ("thresholds.memory_percent", self.thresholds.memory_percent),
+            (
+                "thresholds.disk_usage_percent",
+                self.thresholds.disk_usage_percent,
+            ),
+        ] {
+            if !(0.0..=100.0).contains(&value) {
+                return Err(ConfigError::parse(format!(
+                    "{key}: must be between 0 and 100, got {value}"
+                )));
+            }
+        }
+
+        let temperature = self.thresholds.temperature_celsius;
+        if !temperature.is_finite() || temperature <= 0.0 {
+            return Err(ConfigError::parse(format!(
+                "thresholds.temperature_celsius: must be greater than 0, got {temperature}"
+            )));
+        }
+        Ok(())
     }
 
     /// Load a config file. A missing file is not an error: defaults apply.
@@ -188,6 +216,23 @@ fn load_from(local: &Path, user: Option<&Path>) -> Result<Config, ConfigError> {
     Ok(Config::default())
 }
 
+/// `~` and `~/x` appear in the docs; a literal `~` directory is never intended.
+fn expand_home(path: Option<PathBuf>) -> Option<PathBuf> {
+    let path = path?;
+    let text = path.to_string_lossy().into_owned();
+    let rest = match text.as_str() {
+        "~" => "",
+        other => match other.strip_prefix("~/") {
+            Some(rest) => rest,
+            None => return Some(path),
+        },
+    };
+    match std::env::var_os("HOME") {
+        Some(home) => Some(PathBuf::from(home).join(rest)),
+        None => Some(path),
+    }
+}
+
 fn user_config_path() -> Option<PathBuf> {
     let base = match std::env::var_os("XDG_CONFIG_HOME") {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
@@ -204,11 +249,29 @@ where
     parse_duration(&text).map_err(serde::de::Error::custom)
 }
 
+const DURATION_UNITS: [(&str, f64); 4] = [
+    ("ms", 1.0),
+    ("s", 1_000.0),
+    ("m", 60_000.0),
+    ("h", 3_600_000.0),
+];
+
+fn unit_list() -> String {
+    DURATION_UNITS
+        .iter()
+        .map(|(unit, _)| *unit)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn parse_duration(text: &str) -> Result<Duration, String> {
     let text = text.trim();
     let split = text
         .find(|c: char| !c.is_ascii_digit() && c != '.')
-        .ok_or_else(|| format!("`{text}` is missing a unit (ms, s, m or h)"))?;
+        .ok_or_else(|| {
+            let units = unit_list();
+            format!("`{text}` is missing a unit ({units})")
+        })?;
     let (number, unit) = text.split_at(split);
     if number.is_empty() {
         return Err(format!("`{text}` is missing a number"));
@@ -216,13 +279,14 @@ fn parse_duration(text: &str) -> Result<Duration, String> {
     let value: f64 = number
         .parse()
         .map_err(|_| format!("`{text}` has an invalid number"))?;
-    let millis = match unit {
-        "ms" => value,
-        "s" => value * 1_000.0,
-        "m" => value * 60_000.0,
-        "h" => value * 3_600_000.0,
-        _ => return Err(format!("`{text}` uses an unknown unit `{unit}`")),
-    };
+    let millis = DURATION_UNITS
+        .iter()
+        .find(|(suffix, _)| *suffix == unit)
+        .map(|(_, scale)| value * scale)
+        .ok_or_else(|| {
+            let units = unit_list();
+            format!("`{text}` uses an unknown unit `{unit}` (expected {units})")
+        })?;
     if !millis.is_finite() || millis <= 0.0 {
         return Err(format!(
             "`{text}` must be a finite duration greater than zero"
@@ -234,14 +298,22 @@ fn parse_duration(text: &str) -> Result<Duration, String> {
 
 /// Prefix the parser's message with the dotted key path, which TOML errors omit.
 fn describe_error(text: &str, error: &toml::de::Error) -> String {
-    match error.span().and_then(|span| key_path_at(text, span.start)) {
-        Some(path) => format!("{path}: {}", error.message()),
-        None => error.message().to_string(),
+    let Some(span) = error.span() else {
+        return error.message().to_string();
+    };
+    let line = text
+        .get(..span.start)
+        .map_or(1, |upto| upto.lines().count() + 1);
+    match key_path_at(text, span.start) {
+        Some(path) => format!("{path} (line {line}): {}", error.message()),
+        None => format!("line {line}: {}", error.message()),
     }
 }
 
+/// shortcut: inline tables and multi-line arrays report the enclosing key rather
+/// than the leaf; upgrade if configs start using them.
 fn key_path_at(text: &str, byte: usize) -> Option<String> {
-    let upto = &text[..byte.min(text.len())];
+    let upto = text.get(..byte)?;
     let line_start = upto.rfind('\n').map_or(0, |i| i + 1);
     let line = &text[line_start..];
     let key = line.split_once('=')?.0.trim();
@@ -464,5 +536,49 @@ mod tests {
         assert_eq!(c.ui.theme, "dark");
         assert!(c.general.persist_history);
         assert_eq!(c.critical_processes.names, ["systemd", "sshd", "init"]);
+    }
+
+    #[test]
+    fn unknown_key_under_critical_processes_fails() {
+        let err = Config::from_toml("[critical_processes]\nnamess = [\"sshd\"]").unwrap_err();
+
+        assert!(err.to_string().contains("namess"), "{err}");
+    }
+
+    #[test]
+    fn tilde_paths_expand_to_home() {
+        if std::env::var_os("HOME").is_none() {
+            return;
+        }
+        let c = Config::from_toml(
+            "[general]\ndata_dir = \"~/sentinel-data\"\n[alerts]\nlog_file = \"~/alerts.log\"",
+        )
+        .unwrap();
+
+        let dir = c.general.data_dir.unwrap();
+        let log = c.alerts.log_file.unwrap();
+        assert!(!dir.to_string_lossy().starts_with('~'), "{dir:?}");
+        assert!(dir.ends_with("sentinel-data"), "{dir:?}");
+        assert!(!log.to_string_lossy().starts_with('~'), "{log:?}");
+    }
+
+    #[test]
+    fn impossible_thresholds_are_rejected() {
+        for (key, value) in [
+            ("cpu_percent", "-1"),
+            ("cpu_percent", "150"),
+            ("disk_usage_percent", "101"),
+        ] {
+            let text = format!("[thresholds]\n{key} = {value}");
+            let err = Config::from_toml(&text).unwrap_err();
+            assert!(err.to_string().contains("thresholds."), "{err}");
+        }
+    }
+
+    #[test]
+    fn non_positive_temperature_threshold_is_rejected() {
+        let err = Config::from_toml("[thresholds]\ntemperature_celsius = 0").unwrap_err();
+
+        assert!(err.to_string().contains("temperature_celsius"), "{err}");
     }
 }
