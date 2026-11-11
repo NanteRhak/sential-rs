@@ -2,10 +2,12 @@
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use crate::core::process::{ProcessSample, ProcessState};
 
 /// A process that went away.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ExitRecord {
     pub timestamp: u64,
     pub pid: u32,
@@ -17,6 +19,10 @@ pub struct ExitRecord {
     pub signal: Option<i32>,
     /// Whether the exit looked like a normal one.
     pub expected: bool,
+    /// Whether the OOM killer is likely to have taken it.
+    pub oom_killed: bool,
+    /// The line of the kernel log that says so.
+    pub evidence: Option<String>,
     /// What the process was using when it was last seen.
     pub last_cpu_percent: f64,
     pub last_mem_rss_bytes: u64,
@@ -47,11 +53,57 @@ pub struct ExitTracker {
     seen: HashMap<(u32, u64), ProcessSample>,
     /// The processes that went away.
     exits: Vec<ExitRecord>,
+    /// The recent exits of each process name, for restart loops.
+    restarts: HashMap<String, Vec<u64>>,
+    /// How many restarts in the window count as a restart loop.
+    restart_count: u32,
+    /// The window the restarts are counted in.
+    restart_window: std::time::Duration,
+    /// Whether to look for OOM evidence.
+    oom_evidence: bool,
+}
+
+/// A process that keeps coming back.
+#[derive(Debug, Clone, Serialize)]
+pub struct RestartLoop {
+    pub process_name: String,
+    pub count: u32,
+    pub window_secs: u64,
+    pub first_seen: u64,
 }
 
 impl ExitTracker {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Look for restart loops, and for OOM evidence.
+    pub fn with_detection(
+        mut self,
+        restart_count: u32,
+        restart_window: std::time::Duration,
+        oom_evidence: bool,
+    ) -> Self {
+        self.restart_count = restart_count;
+        self.restart_window = restart_window;
+        self.oom_evidence = oom_evidence;
+        self
+    }
+
+    /// The processes that keep coming back.
+    pub fn restart_loops(&self) -> Vec<RestartLoop> {
+        let window = self.restart_window.as_millis() as u64;
+        let now = crate::collect::now_millis();
+        self.restarts
+            .iter()
+            .filter(|(_, times)| times.len() as u32 >= self.restart_count)
+            .map(|(name, times)| RestartLoop {
+                process_name: name.clone(),
+                count: times.len() as u32,
+                window_secs: window / 1_000,
+                first_seen: times.first().copied().unwrap_or(now),
+            })
+            .collect()
     }
 
     /// The exits noticed so far, oldest first.
@@ -72,7 +124,7 @@ impl ExitTracker {
             if process.state == ProcessState::Zombie {
                 // It has finished, and its parent has not taken it away yet.
                 if let Some(previous) = self.seen.remove(&key) {
-                    gone.push(exit_record(&previous, true));
+                    gone.push(exit_record(&previous, true, self.oom_evidence));
                 }
                 continue;
             }
@@ -82,11 +134,20 @@ impl ExitTracker {
         // The processes that are simply not there any more.
         for (key, process) in &self.seen {
             if !seen.contains_key(key) {
-                gone.push(exit_record(process, false));
+                gone.push(exit_record(process, false, self.oom_evidence));
             }
         }
 
         self.seen = seen;
+
+        let window = self.restart_window.as_millis() as u64;
+        let now = crate::collect::now_millis();
+        for exit in &gone {
+            let times = self.restarts.entry(exit.process_name.clone()).or_default();
+            times.push(exit.timestamp);
+            times.retain(|at| now.saturating_sub(*at) <= window);
+        }
+
         self.exits.extend(gone.iter().cloned());
         if self.exits.len() > 50 {
             self.exits.drain(..self.exits.len() - 50);
@@ -96,7 +157,12 @@ impl ExitTracker {
 }
 
 /// The record of a process that went away.
-fn exit_record(process: &ProcessSample, expected: bool) -> ExitRecord {
+fn exit_record(process: &ProcessSample, expected: bool, oom_evidence: bool) -> ExitRecord {
+    let evidence = if oom_evidence && !expected {
+        crate::oom::evidence_for(process.pid)
+    } else {
+        None
+    };
     ExitRecord {
         timestamp: crate::collect::now_millis(),
         pid: process.pid,
@@ -106,6 +172,8 @@ fn exit_record(process: &ProcessSample, expected: bool) -> ExitRecord {
         signal: None,
         // A process that was a zombie had already finished on its own.
         expected,
+        oom_killed: evidence.is_some(),
+        evidence,
         last_cpu_percent: process.cpu_percent,
         last_mem_rss_bytes: process.mem_rss_bytes,
         last_mem_percent: process.mem_percent,
@@ -208,6 +276,35 @@ mod tests {
 
         assert_eq!(gone.len(), 1);
         assert_eq!(gone[0].process_name, "backup");
+    }
+
+    #[test]
+    fn a_process_that_keeps_coming_back_is_a_restart_loop() {
+        let mut tracker =
+            ExitTracker::new().with_detection(3, std::time::Duration::from_secs(60), false);
+
+        for step in 0..3 {
+            tracker.observe(&[process(42, "backup", ProcessState::Running)]);
+            tracker.observe(&[]);
+            let _ = step;
+        }
+
+        let loops = tracker.restart_loops();
+
+        assert_eq!(loops.len(), 1, "{loops:?}");
+        assert_eq!(loops[0].process_name, "backup");
+        assert_eq!(loops[0].count, 3);
+    }
+
+    #[test]
+    fn a_process_that_restarts_once_is_not_a_restart_loop() {
+        let mut tracker =
+            ExitTracker::new().with_detection(3, std::time::Duration::from_secs(60), false);
+
+        tracker.observe(&[process(42, "backup", ProcessState::Running)]);
+        tracker.observe(&[]);
+
+        assert!(tracker.restart_loops().is_empty());
     }
 
     #[test]

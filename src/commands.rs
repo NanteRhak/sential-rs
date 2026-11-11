@@ -101,7 +101,12 @@ fn top(config: Config, json: bool) -> Result<(), String> {
 /// raises as they happen.
 pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
     let sampler = Sampler::new(interval, Box::new(ProcCollector::default()))
-        .with_history(config.general.history_duration);
+        .with_history(config.general.history_duration)
+        .with_detection(
+            config.detection.restart_count,
+            config.detection.restart_window,
+            config.detection.oom_evidence,
+        );
     if !config.alerts.enabled || config.alerts.rules.is_empty() {
         return sampler;
     }

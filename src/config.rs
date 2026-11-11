@@ -18,6 +18,7 @@ pub struct Config {
     pub thresholds: Thresholds,
     pub alerts: Alerts,
     pub actions: Actions,
+    pub detection: Detection,
     pub critical_processes: CriticalProcesses,
 }
 
@@ -233,6 +234,29 @@ impl Condition {
             Condition::Above => value > threshold,
             Condition::Below => value < threshold,
             Condition::Spike => false,
+        }
+    }
+}
+
+/// How the tool spots what has gone wrong.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Detection {
+    /// Whether to look for OOM evidence in the kernel log.
+    pub oom_evidence: bool,
+    /// How many restarts in the window count as a restart loop.
+    pub restart_count: u32,
+    /// The window the restarts are counted in.
+    #[serde(deserialize_with = "de_duration")]
+    pub restart_window: Duration,
+}
+
+impl Default for Detection {
+    fn default() -> Self {
+        Self {
+            oom_evidence: true,
+            restart_count: 5,
+            restart_window: Duration::from_secs(60),
         }
     }
 }

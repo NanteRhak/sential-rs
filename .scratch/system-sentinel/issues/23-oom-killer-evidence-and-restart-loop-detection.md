@@ -4,10 +4,10 @@
 
 **Blocked by:** 22: Process exit and crash detection.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] When the OOM killer is the likely cause of an exit, the exit record says so and names the evidence
-- [ ] The tool looks for OOM evidence in the kernel log where permissions allow, and degrades quietly where they do not
-- [ ] A process that restarts repeatedly within a window is reported as a restart loop
-- [ ] The restart count and the window are configurable
-- [ ] A test feeds a synthetic exit sequence and asserts a restart loop is reported
+- [x] When the OOM killer is the likely cause of an exit, the exit record says so and names the evidence
+- [x] The tool looks for OOM evidence in the kernel log where permissions allow, and degrades quietly where they do not
+- [x] A process that restarts repeatedly within a window is reported as a restart loop
+- [x] The restart count and the window are configurable
+- [x] A test feeds a synthetic exit sequence and asserts a restart loop is reported

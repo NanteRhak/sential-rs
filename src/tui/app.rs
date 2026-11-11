@@ -263,6 +263,7 @@ impl App {
             processes,
             alerts: Vec::new(),
             exits: Vec::new(),
+            restart_loops: Vec::new(),
         };
         App::new(Arc::new(Shared::default())).with_state(state)
     }
@@ -278,6 +279,7 @@ impl App {
                 processes: Vec::new(),
                 alerts,
                 exits: Vec::new(),
+                restart_loops: Vec::new(),
             }),
             std::time::Duration::from_secs(600),
         );
@@ -296,6 +298,7 @@ impl App {
                     processes: Vec::new(),
                     alerts: Vec::new(),
                     exits: Vec::new(),
+                    restart_loops: Vec::new(),
                 }),
                 std::time::Duration::from_secs(600),
             );

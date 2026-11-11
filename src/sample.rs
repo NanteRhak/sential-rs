@@ -14,7 +14,7 @@ use crate::collect::process;
 use crate::collect::{Collector, RawSnapshot, sample_between};
 use crate::core::metrics::SystemSample;
 use crate::core::process::ProcessSample;
-use crate::exits::{ExitRecord, ExitTracker};
+use crate::exits::{ExitRecord, ExitTracker, RestartLoop};
 use crate::history::{CAPACITY, Ring};
 
 /// The latest published state. Cloning is cheap: it holds no locks.
@@ -27,6 +27,8 @@ pub struct SamplerState {
     pub alerts: Vec<Alert>,
     /// The processes that went away, oldest first.
     pub exits: Vec<ExitRecord>,
+    /// The processes that keep coming back.
+    pub restart_loops: Vec<RestartLoop>,
 }
 
 /// What happens when an alert is raised.
@@ -118,6 +120,18 @@ impl Sampler {
         self
     }
 
+    /// Look for restart loops and OOM evidence.
+    pub fn with_detection(
+        mut self,
+        restart_count: u32,
+        restart_window: Duration,
+        oom_evidence: bool,
+    ) -> Self {
+        self.tracker =
+            ExitTracker::new().with_detection(restart_count, restart_window, oom_evidence);
+        self
+    }
+
     /// Watch the metrics and raise alerts when the rules call for it.
     pub fn with_alerts(mut self, engine: AlertEngine, on_alert: AlertSink) -> Self {
         self.alerts = Some(engine);
@@ -192,12 +206,14 @@ impl Sampler {
         let mut exits = self.state().exits.clone();
         exits.extend(self.tracker.observe(&processes));
         exits.truncate(50);
+        let restart_loops = self.tracker.restart_loops();
         let state = Arc::new(SamplerState {
             tick: self.state().tick + 1,
             system,
             processes,
             alerts,
             exits,
+            restart_loops,
         });
         self.shared.publish(state.clone(), self.history_duration);
         state
