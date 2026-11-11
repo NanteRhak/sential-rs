@@ -73,6 +73,51 @@ persistence, and turns off the per-process I/O and network collectors.
 
 An invalid config is refused at startup with the offending key and line number.
 
+## Installation
+
+From a release tarball:
+
+```bash
+make package                       # builds build/sentinel-<version>.tar.gz
+tar -C build -xzf build/sentinel-*.tar.gz
+sudo make install                  # into /usr/local
+```
+
+Or with Cargo:
+
+```bash
+cargo install --path .
+```
+
+`make install` puts the binary in `/usr/local/bin` and the service unit in
+`/usr/local/lib/systemd/system`. The configuration file is looked for in
+this order:
+
+1. the file named by the `SENTINEL_CONFIG` environment variable
+2. `sentinel.toml` in the current directory
+3. `$XDG_CONFIG_HOME/sentinel/config.toml`, or
+   `~/.config/sentinel/config.toml`
+
+## Running it as a service
+
+The service unit is `packaging/systemd/sentinel.service`. It runs the daemon
+as an unprivileged `sentinel` user, restarts it when it fails, and writes
+what the daemon is doing to `/var/lib/sentinel/sentinel.log`.
+
+```bash
+sudo useradd --system --no-create-home sentinel
+sudo install -d -o sentinel -g sentinel /etc/sentinel /var/lib/sentinel
+sudo install -Dm644 packaging/systemd/sentinel.service \
+    /etc/systemd/system/sentinel.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now sentinel
+```
+
+The configuration of the service lives in `/etc/sentinel/config.toml`, which
+the unit points at with `SENTINEL_CONFIG`. The unit creates
+`/etc/sentinel` and `/var/lib/sentinel` itself with `ConfigurationDirectory`
+and `StateDirectory`.
+
 ## Daemon mode
 
 `sentinel daemon` collects metrics, watches the alert rules, stores the

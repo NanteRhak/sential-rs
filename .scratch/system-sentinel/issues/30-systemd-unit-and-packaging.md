@@ -4,10 +4,10 @@
 
 **Blocked by:** 29: Daemon mode.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A systemd service unit is provided that starts the daemon, sets its log destination and restarts it on failure
-- [ ] The service runs as an unprivileged user by default
-- [ ] Release artefacts can be built as a plain binary and as a distribution package
-- [ ] The README explains installation, configuration and the systemd unit
-- [ ] A test verifies the service unit is valid and the binary builds in release mode
+- [x] A systemd service unit is provided that starts the daemon, sets its log destination and restarts it on failure
+- [x] The service runs as an unprivileged user by default
+- [x] Release artefacts can be built as a plain binary and as a distribution package
+- [x] The README explains installation, configuration and the systemd unit
+- [x] A test verifies the service unit is valid and the binary builds in release mode

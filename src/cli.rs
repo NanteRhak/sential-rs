@@ -136,5 +136,8 @@ pub enum Command {
         /// Detach from the terminal and run on its own
         #[arg(long)]
         background: bool,
+        /// Where to write what the daemon is doing
+        #[arg(long, value_name = "PATH")]
+        log_file: Option<String>,
     },
 }

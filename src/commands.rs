@@ -41,7 +41,8 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
         Command::Daemon {
             duration,
             background,
-        } => daemon(config, duration, background),
+            log_file,
+        } => daemon(config, duration, background, log_file),
     }
 }
 
@@ -371,7 +372,12 @@ fn describe_interval(interval: Duration) -> String {
 }
 
 /// Run in the background, collecting and watching.
-fn daemon(config: Config, duration: Option<String>, background: bool) -> Result<(), String> {
+fn daemon(
+    config: Config,
+    duration: Option<String>,
+    background: bool,
+    log_file: Option<String>,
+) -> Result<(), String> {
     let limit = match duration {
         Some(text) => Some(parse_duration(&text).map_err(|error| format!("--duration: {error}"))?),
         None => None,
@@ -390,6 +396,9 @@ fn daemon(config: Config, duration: Option<String>, background: bool) -> Result<
         config.policies.dry_run,
     ));
 
+    let log_file = log_file
+        .map(std::path::PathBuf::from)
+        .or_else(|| config.daemon.log_file.clone());
     println!(
         "sentinel daemon: sampling every {}",
         describe_interval(interval)
@@ -415,24 +424,34 @@ fn daemon(config: Config, duration: Option<String>, background: bool) -> Result<
             state.processes.len()
         );
         println!("{line}");
-        if let Some(path) = &config.daemon.log_file {
-            let _ = crate::action::write_record(
-                path,
-                &crate::action::ActionRecord {
-                    timestamp: crate::collect::now_millis(),
-                    action: "daemon".into(),
-                    pid: 0,
-                    process_name: "sentinel".into(),
-                    reason: line.clone(),
-                    user_requested: false,
-                    result: "running".into(),
-                },
-            );
+        if let Some(path) = &log_file {
+            append_log(path, &line);
         }
     });
     sampler.flush_history();
     println!("sentinel daemon: stopped");
     Ok(())
+}
+
+/// Add a line to the daemon log.
+fn append_log(path: &std::path::Path, line: &str) {
+    use std::io::Write;
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(
+            file,
+            "[{}] {line}",
+            crate::view::clock(crate::collect::now_millis() / 1_000)
+        );
+    }
 }
 
 /// Detach from the terminal and carry on without it.

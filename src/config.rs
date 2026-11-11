@@ -470,6 +470,14 @@ impl Config {
         Ok(())
     }
 
+    /// Load the config file the environment points at, if there is one.
+    pub fn from_env() -> Result<Config, ConfigError> {
+        match std::env::var_os("SENTINEL_CONFIG") {
+            Some(path) => Config::from_path(Path::new(&path)),
+            None => Ok(Config::default()),
+        }
+    }
+
     /// Load a config file. A missing file is not an error: defaults apply.
     pub fn from_path(path: &Path) -> Result<Config, ConfigError> {
         match fs::read_to_string(path) {
@@ -480,8 +488,15 @@ impl Config {
         }
     }
 
-    /// Local `sentinel.toml` wins; otherwise the user config; otherwise defaults.
+    /// The file the environment points at wins; then the local
+    /// `sentinel.toml`; then the user config; otherwise the defaults.
     pub fn load() -> Result<Config, ConfigError> {
+        if let Some(path) = std::env::var_os("SENTINEL_CONFIG") {
+            let path = PathBuf::from(path);
+            if path.exists() {
+                return Config::from_path(&path);
+            }
+        }
         load_from(Path::new("sentinel.toml"), user_config_path().as_deref())
     }
 
