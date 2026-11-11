@@ -1,0 +1,26 @@
+[Unit]
+Description=Rust System Sentinel, a lightweight Linux system monitor
+Documentation=https://github.com/NanteRhak/sential-rs
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sentinel daemon --log-file /var/lib/sentinel/sentinel.log
+User=sentinel
+Group=sentinel
+Restart=on-failure
+RestartSec=5s
+Environment=SENTINEL_CONFIG=/etc/sentinel/config.toml
+StateDirectory=sentinel
+ConfigurationDirectory=sentinel
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -4,6 +4,7 @@
 htop's view of the machine, plus the things htop cannot tell you: what happened
 ten seconds ago, which process spiked for 200 ms, and what to do about it.
 
+[![CI](https://github.com/NanteRhak/sential-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/NanteRhak/sential-rs/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rust-2024--orange?style=flat-square)](https://www.rust-lang.org/)
 [![Linux](https://img.shields.io/badge/platform-linux-lightgrey?style=flat-square)](https://www.kernel.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-7-informational?style=flat-square)](Cargo.toml)
