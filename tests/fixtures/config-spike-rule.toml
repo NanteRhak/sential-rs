@@ -1,0 +1,13 @@
+[[alerts.rules]]
+name = "cpu-spike"
+metric = "cpu_percent"
+condition = "spike"
+duration = "500ms"
+severity = "warning"
+message = "CPU spiked"
+
+[alerts.rules.spike]
+baseline = "ewma"
+window = "60s"
+multiple = 5.0
+minimum = 50.0

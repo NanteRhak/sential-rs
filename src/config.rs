@@ -149,6 +149,8 @@ pub struct AlertRule {
     /// The metric to watch, for example `cpu_percent`.
     pub metric: String,
     pub condition: Condition,
+    /// How a spike is measured, for the `spike` condition.
+    pub spike: Option<SpikeOptions>,
     pub threshold: f64,
     /// How long the condition must hold before the alert is raised.
     #[serde(deserialize_with = "de_duration")]
@@ -167,12 +169,46 @@ impl Default for AlertRule {
             name: String::new(),
             metric: String::new(),
             condition: Condition::Above,
+            spike: None,
             threshold: 0.0,
             duration: Duration::from_secs(0),
             severity: Severity::Warning,
             message: String::new(),
             enabled: true,
             cooldown: Duration::from_secs(60),
+        }
+    }
+}
+
+/// How the baseline of a spike is worked out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Baseline {
+    #[default]
+    MovingAverage,
+    Ewma,
+}
+
+/// How much of the recent past a spike is compared against.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SpikeOptions {
+    pub baseline: Baseline,
+    #[serde(deserialize_with = "de_duration")]
+    pub window: Duration,
+    /// How many times the baseline the value has to be.
+    pub multiple: f64,
+    /// The value has to be at least this, so a small fluctuation is not a spike.
+    pub minimum: f64,
+}
+
+impl Default for SpikeOptions {
+    fn default() -> Self {
+        Self {
+            baseline: Baseline::default(),
+            window: Duration::from_secs(30),
+            multiple: 2.0,
+            minimum: 0.0,
         }
     }
 }
@@ -184,14 +220,19 @@ pub enum Condition {
     #[default]
     Above,
     Below,
+    Spike,
 }
 
 impl Condition {
     /// Whether the value is a problem.
+    ///
+    /// The `spike` condition is worked out against a baseline, so it is not
+    /// decided here.
     pub fn holds(&self, value: f64, threshold: f64) -> bool {
         match self {
             Condition::Above => value > threshold,
             Condition::Below => value < threshold,
+            Condition::Spike => false,
         }
     }
 }
@@ -637,6 +678,19 @@ mod tests {
 
         assert_eq!(c.alerts.rules[1].condition, Condition::Below);
         assert!(!c.alerts.rules[1].enabled);
+    }
+
+    #[test]
+    fn a_spike_rule_is_read() {
+        let c = Config::from_path(&fixture("config-spike-rule.toml")).unwrap();
+
+        let rule = &c.alerts.rules[0];
+        assert_eq!(rule.condition, Condition::Spike);
+        let spike = rule.spike.as_ref().unwrap();
+        assert_eq!(spike.baseline, Baseline::Ewma);
+        assert_eq!(spike.window, Duration::from_secs(60));
+        assert_eq!(spike.multiple, 5.0);
+        assert_eq!(spike.minimum, 50.0);
     }
 
     #[test]

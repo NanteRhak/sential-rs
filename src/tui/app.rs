@@ -902,6 +902,7 @@ mod tests {
             process_name: None,
             current_value: 95.0,
             threshold: Some(90.0),
+            baseline: None,
             suggestion: "look around".into(),
         };
         let app = App::with_alerts(vec![alert]);

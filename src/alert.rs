@@ -1,13 +1,13 @@
 //! The anomaly engine: rules that watch a metric and raise alerts.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::AlertRule;
+use crate::config::{AlertRule, Baseline, Condition};
 use crate::core::Severity;
 use crate::core::metrics::SystemSample;
 use crate::core::process::ProcessSample;
@@ -72,6 +72,8 @@ pub struct Alert {
     pub process_name: Option<String>,
     pub current_value: f64,
     pub threshold: Option<f64>,
+    /// The baseline a spike was compared against.
+    pub baseline: Option<f64>,
     pub suggestion: String,
 }
 
@@ -83,6 +85,10 @@ pub struct AlertEngine {
     holding_since: HashMap<String, Instant>,
     /// When each rule last fired, so it can stay quiet for its cooldown.
     last_fired: HashMap<String, Instant>,
+    /// The recent values of each rule, used to work out a baseline.
+    history: HashMap<String, VecDeque<(Instant, f64)>>,
+    /// The exponentially weighted moving average of each rule.
+    ewma: HashMap<String, f64>,
     next_id: u64,
 }
 
@@ -92,6 +98,8 @@ impl AlertEngine {
             rules,
             holding_since: HashMap::new(),
             last_fired: HashMap::new(),
+            history: HashMap::new(),
+            ewma: HashMap::new(),
             next_id: 1,
         }
     }
@@ -112,7 +120,8 @@ impl AlertEngine {
         now: Instant,
     ) -> Vec<Alert> {
         let mut raised = Vec::new();
-        for rule in &self.rules {
+        let rules = self.rules.clone();
+        for rule in &rules {
             if !rule.enabled {
                 continue;
             }
@@ -120,7 +129,18 @@ impl AlertEngine {
             else {
                 continue;
             };
-            if !rule.condition.holds(value, rule.threshold) {
+            let mut baseline = None;
+            let holds = match rule.condition {
+                Condition::Spike => {
+                    let options = rule.spike.clone().unwrap_or_default();
+                    let current = self.baseline(rule, value, now);
+                    baseline = Some(current);
+                    let trigger = current * options.multiple;
+                    value >= trigger && value >= options.minimum && current > 0.0
+                }
+                other => other.holds(value, rule.threshold),
+            };
+            if !holds {
                 self.holding_since.remove(&rule.name);
                 continue;
             }
@@ -147,11 +167,53 @@ impl AlertEngine {
                 pid,
                 process_name,
                 current_value: value,
-                threshold: Some(rule.threshold),
+                threshold: match rule.condition {
+                    Condition::Spike => baseline.map(|current| {
+                        current * rule.spike.as_ref().map(|s| s.multiple).unwrap_or(1.0)
+                    }),
+                    _ => Some(rule.threshold),
+                },
+                baseline,
                 suggestion: category.suggestion().to_string(),
             });
         }
         raised
+    }
+}
+
+impl AlertEngine {
+    /// The baseline a value is compared against, from the recent history.
+    ///
+    /// The current value is folded in afterwards, so it is never part of the
+    /// baseline it is compared against.
+    fn baseline(&mut self, rule: &AlertRule, value: f64, now: Instant) -> f64 {
+        let options = rule.spike.clone().unwrap_or_default();
+        let history = self.history.entry(rule.name.clone()).or_default();
+        while history
+            .front()
+            .is_some_and(|(at, _)| now.duration_since(*at) > options.window)
+        {
+            history.pop_front();
+        }
+        let baseline = match options.baseline {
+            Baseline::MovingAverage => {
+                if history.is_empty() {
+                    0.0
+                } else {
+                    history.iter().map(|(_, value)| value).sum::<f64>() / history.len() as f64
+                }
+            }
+            Baseline::Ewma => self.ewma.get(&rule.name).copied().unwrap_or(0.0),
+        };
+        if options.baseline == Baseline::Ewma {
+            let samples = history.len().max(1) as f64;
+            let alpha = 2.0 / (samples + 1.0);
+            let previous = self.ewma.get(&rule.name).copied().unwrap_or(value);
+            let average = alpha * value + (1.0 - alpha) * previous;
+            self.ewma.insert(rule.name.clone(), average);
+        }
+        history.push_back((now, value));
+        baseline
     }
 }
 
@@ -264,7 +326,6 @@ pub fn metric_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Condition;
     use crate::core::metrics::{CpuSample, MemorySample};
     use crate::core::process::{ProcessSample, ProcessState};
     use std::time::Duration;
@@ -274,6 +335,7 @@ mod tests {
             name: name.to_string(),
             metric: "cpu_percent".to_string(),
             condition: Condition::Above,
+            spike: None,
             threshold,
             duration,
             severity: Severity::Warning,
@@ -367,6 +429,7 @@ mod tests {
             process_name: None,
             current_value: 95.0,
             threshold: Some(90.0),
+            baseline: None,
             suggestion: "look at the busiest processes".into(),
         };
 
@@ -378,6 +441,102 @@ mod tests {
         assert_eq!(read[0].message, "cpu is high");
         assert_eq!(read[0].current_value, 95.0);
         assert_eq!(read[0].severity, Severity::Warning);
+    }
+
+    fn spike_rule(baseline: Baseline) -> AlertRule {
+        AlertRule {
+            name: "spike".to_string(),
+            metric: "cpu_percent".to_string(),
+            condition: Condition::Spike,
+            spike: Some(crate::config::SpikeOptions {
+                baseline,
+                window: Duration::from_secs(30),
+                multiple: 3.0,
+                minimum: 50.0,
+            }),
+            threshold: 0.0,
+            duration: Duration::from_secs(0),
+            severity: Severity::Warning,
+            message: "cpu spiked".to_string(),
+            enabled: true,
+            cooldown: Duration::from_secs(60),
+        }
+    }
+
+    #[test]
+    fn a_spike_is_measured_against_the_moving_average() {
+        let mut engine = AlertEngine::new(vec![spike_rule(Baseline::MovingAverage)]);
+        let start = Instant::now();
+
+        // A quiet machine, then one large jump.
+        for step in 0..5 {
+            let _ = engine.evaluate(&sample(10.0), &[], start + Duration::from_secs(step));
+        }
+        let raised = engine.evaluate(&sample(90.0), &[], start + Duration::from_secs(5));
+
+        assert_eq!(raised.len(), 1, "{raised:?}");
+        assert_eq!(raised[0].current_value, 90.0);
+        assert_eq!(raised[0].baseline, Some(10.0));
+        assert_eq!(raised[0].threshold, Some(30.0));
+    }
+
+    #[test]
+    fn a_spike_is_measured_against_the_exponential_average() {
+        let mut engine = AlertEngine::new(vec![spike_rule(Baseline::Ewma)]);
+        let start = Instant::now();
+
+        for step in 0..5 {
+            let _ = engine.evaluate(&sample(10.0), &[], start + Duration::from_secs(step));
+        }
+        let raised = engine.evaluate(&sample(90.0), &[], start + Duration::from_secs(5));
+
+        assert_eq!(raised.len(), 1, "{raised:?}");
+        let baseline = raised[0].baseline.unwrap();
+        assert!(baseline < 20.0, "baseline {baseline} is not an average");
+        assert!(baseline > 0.0, "baseline {baseline} is not a baseline");
+    }
+
+    #[test]
+    fn a_small_fluctuation_is_not_a_spike() {
+        let mut engine = AlertEngine::new(vec![spike_rule(Baseline::MovingAverage)]);
+        let start = Instant::now();
+
+        for step in 0..5 {
+            let _ = engine.evaluate(&sample(10.0), &[], start + Duration::from_secs(step));
+        }
+        let raised = engine.evaluate(&sample(12.0), &[], start + Duration::from_secs(5));
+
+        assert!(raised.is_empty(), "{raised:?}");
+    }
+
+    #[test]
+    fn a_value_below_the_minimum_is_not_a_spike() {
+        let mut engine = AlertEngine::new(vec![spike_rule(Baseline::MovingAverage)]);
+        let start = Instant::now();
+
+        for step in 0..5 {
+            let _ = engine.evaluate(&sample(1.0), &[], start + Duration::from_secs(step));
+        }
+        let raised = engine.evaluate(&sample(40.0), &[], start + Duration::from_secs(5));
+
+        assert!(raised.is_empty(), "{raised:?}");
+    }
+
+    #[test]
+    fn one_jump_raises_one_spike_alert() {
+        let mut engine = AlertEngine::new(vec![spike_rule(Baseline::MovingAverage)]);
+        let start = Instant::now();
+
+        let mut raised = Vec::new();
+        for (step, value) in [10.0, 10.0, 10.0, 90.0, 10.0, 10.0].iter().enumerate() {
+            raised.extend(engine.evaluate(
+                &sample(*value),
+                &[],
+                start + Duration::from_secs(step as u64),
+            ));
+        }
+
+        assert_eq!(raised.len(), 1, "{raised:?}");
     }
 
     #[test]

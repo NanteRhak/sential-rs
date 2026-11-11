@@ -702,6 +702,7 @@ mod tests {
             process_name: Some("backup".into()),
             current_value: 95.0,
             threshold: Some(90.0),
+            baseline: None,
             suggestion: "look at the busiest processes".into(),
         };
 
