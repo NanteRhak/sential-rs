@@ -3,6 +3,7 @@ use clap::Parser;
 use sentinel::cli::Cli;
 
 fn main() {
+    sentinel::interrupt::default_pipe();
     let cli = Cli::parse();
     let config = match sentinel::config::Config::load() {
         Ok(config) => config,

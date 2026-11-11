@@ -4,6 +4,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 
+/// Die quietly when the output is piped into something that stops reading,
+/// the way any other command does.
+pub fn default_pipe() {
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
 /// Catch Ctrl-C so the tool can stop tidily instead of being killed.
 pub fn install() {
     unsafe {

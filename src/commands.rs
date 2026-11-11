@@ -304,17 +304,17 @@ fn limit(
         return Err("no limit was given: use --cpu, --memory or --remove".into());
     }
 
-    if config.actions.confirm && !yes && !confirm(&format!("limit {target} ({pid})? [y/N] ")) {
-        let result = "refused: the user said no".to_string();
-        record_action(&config, "limit", pid, &target.name, "user asked", &result);
-        return Err("cancelled".into());
-    }
-
     if dry_run {
         let result = "dry run: nothing was changed".to_string();
         record_action(&config, "limit", pid, &target.name, "user asked", &result);
         println!("would limit {target} ({pid}) to {limits:?}");
         return Ok(());
+    }
+
+    if config.actions.confirm && !yes && !confirm(&format!("limit {target} ({pid})? [y/N] ")) {
+        let result = "refused: the user said no".to_string();
+        record_action(&config, "limit", pid, &target.name, "user asked", &result);
+        return Err("cancelled".into());
     }
 
     let total_memory = crate::collect::proc::ProcFs::system()

@@ -132,7 +132,7 @@ fn on_menu_key(app: &mut App, key: KeyEvent) {
                     app.menu = Some(Menu::Confirm(action, value));
                 }
             }
-            KeyCode::Esc => app.close_menu(),
+            KeyCode::Esc | KeyCode::Char('q') => app.close_menu(),
             _ => {}
         },
         Some(Menu::Confirm(action, value)) => match key.code {
@@ -144,7 +144,7 @@ fn on_menu_key(app: &mut App, key: KeyEvent) {
                 app.perform(true);
                 app.close_menu();
             }
-            KeyCode::Char('n') | KeyCode::Esc => app.close_menu(),
+            KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q') => app.close_menu(),
             _ => {
                 let _ = (action, value);
             }
@@ -159,7 +159,7 @@ fn on_menu_key(app: &mut App, key: KeyEvent) {
                 app.perform(true);
                 app.close_menu();
             }
-            KeyCode::Esc => app.close_menu(),
+            KeyCode::Esc | KeyCode::Char('q') => app.close_menu(),
             _ => {}
         },
     }
