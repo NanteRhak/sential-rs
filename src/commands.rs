@@ -37,7 +37,7 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
             yes,
             dry_run,
         } => renice(config, pid, value, yes, dry_run),
-        Command::Report => Err("report is not implemented yet".into()),
+        Command::Report { last, json } => report(config, last, json),
         Command::Daemon => Err("daemon is not implemented yet".into()),
     }
 }
@@ -355,6 +355,38 @@ fn describe_interval(interval: Duration) -> String {
     } else {
         format!("{:.1}s", interval.as_secs_f64())
     }
+}
+
+/// Summarise what happened over a window.
+fn report(config: Config, last: Option<String>, json: bool) -> Result<(), String> {
+    let window = match last {
+        Some(text) => parse_duration(&text).map_err(|error| format!("--last: {error}"))?,
+        None => Duration::from_secs(600),
+    };
+    let samples = match history_store(&config) {
+        Some(store) => store.read(),
+        None => Vec::new(),
+    };
+    let alerts = match &config.alerts.log_file {
+        Some(path) => read_alerts(path),
+        None => Vec::new(),
+    };
+    let report = crate::report::Report::build(&samples, &alerts, window);
+    if json {
+        println!("{}", report.to_json());
+    } else {
+        print!("{}", view::report(&report));
+    }
+    Ok(())
+}
+
+/// The history file, when the tool is keeping one.
+fn history_store(config: &Config) -> Option<crate::store::Store> {
+    if !config.general.persist_history {
+        return None;
+    }
+    let dir = config.general.data_dir.clone()?;
+    Some(crate::store::Store::new(crate::store::history_path(&dir)))
 }
 
 /// The alerts of the last window, read back from the log file.

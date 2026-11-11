@@ -310,6 +310,68 @@ pub fn exit_line(exit: &crate::exits::ExitRecord) -> String {
     )
 }
 
+/// The report, as it is shown.
+pub fn report(report: &crate::report::Report) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "Report for the last {} ({} samples)\n",
+        uptime(report.window_secs),
+        report.samples
+    ));
+    out.push_str(&row(
+        "CPU",
+        &format!(
+            "peak {:.1}%  average {:.1}%",
+            report.cpu.peak, report.cpu.average
+        ),
+    ));
+    out.push_str(&row(
+        "Memory",
+        &format!(
+            "peak {:.1}%  average {:.1}%",
+            report.memory.peak, report.memory.average
+        ),
+    ));
+    out.push_str(&row("Load", &format!("peak {:.2}", report.load.peak)));
+    out.push_str(&row(
+        "Disk",
+        &format!(
+            "read peak {}  write peak {}",
+            bytes_to_human(report.disk_read.peak as u64),
+            bytes_to_human(report.disk_write.peak as u64)
+        ),
+    ));
+    out.push_str(&row(
+        "Network",
+        &format!(
+            "received peak {}  sent peak {}",
+            bytes_to_human(report.network_rx.peak as u64),
+            bytes_to_human(report.network_tx.peak as u64)
+        ),
+    ));
+    if report.processes.is_empty() {
+        out.push_str(&row("Busiest processes", "none recorded"));
+    } else {
+        for process in &report.processes {
+            out.push_str(&row(
+                "Process",
+                &format!(
+                    "{} ({}) cpu {:.1}%  memory {:.1}%",
+                    process.name, process.pid, process.peak_cpu_percent, process.peak_mem_percent
+                ),
+            ));
+        }
+    }
+    if report.alerts.is_empty() {
+        out.push_str(&row("Alerts", "none raised"));
+    } else {
+        for alert in &report.alerts {
+            out.push_str(&row("Alert", &alert_line(alert)));
+        }
+    }
+    out
+}
+
 /// A proposed action, as it is shown.
 pub fn proposal_line(proposal: &crate::policy::Proposal) -> String {
     format!(

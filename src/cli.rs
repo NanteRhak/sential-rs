@@ -120,7 +120,14 @@ pub enum Command {
         dry_run: bool,
     },
     /// Summarise what happened over a time window
-    Report,
+    Report {
+        /// The window to cover, for example 10m
+        #[arg(long, value_name = "DURATION")]
+        last: Option<String>,
+        /// Print the report as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Run in the background
     Daemon,
 }

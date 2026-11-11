@@ -4,10 +4,10 @@
 
 **Blocked by:** 04: `sentinel health`: CPU and memory summary.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Recent samples are kept in an in-memory history whose length is set by the configured history duration
-- [ ] `sentinel report --last 10m` summarises what happened over the requested window
-- [ ] The report can be emitted as JSON for scripting
-- [ ] The report covers system metrics, the processes that were busiest, and any alerts raised in that window
-- [ ] A test asserts the report covers the requested window and is valid JSON
+- [x] Recent samples are kept in an in-memory history whose length is set by the configured history duration
+- [x] `sentinel report --last 10m` summarises what happened over the requested window
+- [x] The report can be emitted as JSON for scripting
+- [x] The report covers system metrics, the processes that were busiest, and any alerts raised in that window
+- [x] A test asserts the report covers the requested window and is valid JSON

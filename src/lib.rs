@@ -16,6 +16,8 @@ pub mod interrupt;
 pub mod oom;
 pub mod policy;
 pub mod pressure;
+pub mod report;
 pub mod sample;
+pub mod store;
 pub mod tui;
 pub mod view;

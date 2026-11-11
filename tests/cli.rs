@@ -456,6 +456,33 @@ fn protected_processes_are_marked_in_the_process_list() {
 }
 
 #[test]
+fn report_is_valid_json() {
+    let out = sentinel(&["report", "--last", "1h", "--json"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout).expect("report --json is not valid JSON");
+    assert!(value["cpu"]["peak"].is_number(), "{stdout}");
+    assert!(value["processes"].is_array(), "{stdout}");
+    assert_eq!(value["window_secs"], 3600);
+}
+
+#[test]
+fn the_report_covers_the_window_it_was_asked_for() {
+    let out = sentinel(&["report", "--last", "10m"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        stdout.contains("Report for the last 10:00"),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("CPU"), "stdout: {stdout}");
+    assert!(stdout.contains("Alerts"), "stdout: {stdout}");
+}
+
+#[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);
 
