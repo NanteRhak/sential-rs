@@ -17,6 +17,7 @@ pub struct Config {
     pub sampling: Sampling,
     pub thresholds: Thresholds,
     pub alerts: Alerts,
+    pub actions: Actions,
     pub critical_processes: CriticalProcesses,
 }
 
@@ -195,6 +196,25 @@ impl Condition {
     }
 }
 
+/// What happens when the tool acts on a process.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Actions {
+    /// Where the action log is written. `None` means no log.
+    pub log_file: Option<PathBuf>,
+    /// Whether to ask before acting.
+    pub confirm: bool,
+}
+
+impl Default for Actions {
+    fn default() -> Self {
+        Self {
+            log_file: None,
+            confirm: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CriticalProcesses {
@@ -208,6 +228,7 @@ impl Config {
             toml::from_str(text).map_err(|e| ConfigError::parse(describe_error(text, &e)))?;
         config.general.data_dir = expand_home(config.general.data_dir);
         config.alerts.log_file = expand_home(config.alerts.log_file);
+        config.actions.log_file = expand_home(config.actions.log_file);
         config.apply_profile();
         config.validate()?;
         Ok(config)

@@ -214,6 +214,113 @@ fn alerts_without_a_log_file_says_so() {
     assert!(stderr.contains("no alert log"), "stderr: {stderr}");
 }
 
+fn sleeping_child() -> std::process::Child {
+    Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("failed to start sleep")
+}
+
+#[test]
+fn kill_dry_run_says_what_it_would_do_and_leaves_the_process_alone() {
+    let mut child = sleeping_child();
+    let pid = child.id();
+
+    let out = sentinel(&["kill", &pid.to_string(), "--dry-run"]);
+    let still_running = child.try_wait().unwrap().is_none();
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("would kill"), "stdout: {stdout}");
+    assert!(still_running, "the dry run killed the process");
+}
+
+#[test]
+fn kill_terminates_the_process() {
+    let mut child = sleeping_child();
+    let pid = child.id();
+
+    let out = sentinel(&["kill", &pid.to_string(), "--yes"]);
+    let _ = child.wait();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("SIGTERM"), "stdout: {stdout}");
+    assert!(
+        !child.try_wait().unwrap().is_none(),
+        "the process is still running"
+    );
+}
+
+#[test]
+fn kill_refuses_a_protected_process_and_names_the_rule() {
+    let dir = std::env::temp_dir().join(format!("sentinel-protect-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sentinel.toml"),
+        "[critical_processes]\nnames = [\"sleep\"]\n",
+    )
+    .unwrap();
+    let mut child = sleeping_child();
+    let pid = child.id();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .args(["kill", &pid.to_string(), "--yes"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    let still_running = child.try_wait().unwrap().is_none();
+    let _ = child.kill();
+    let _ = child.wait();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(!out.status.success(), "exit status: {:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("protected"), "stderr: {stderr}");
+    assert!(stderr.contains("critical_processes"), "stderr: {stderr}");
+    assert!(still_running, "a protected process was killed");
+}
+
+#[test]
+fn kill_writes_to_the_action_log() {
+    let dir = std::env::temp_dir().join(format!("sentinel-action-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("sentinel.toml"),
+        "[actions]\nlog_file = \"actions.jsonl\"\n",
+    )
+    .unwrap();
+    let mut child = sleeping_child();
+    let pid = child.id();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_sentinel"))
+        .args(["kill", &pid.to_string(), "--dry-run"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run sentinel");
+    let _ = child.kill();
+    let _ = child.wait();
+    let log = std::fs::read_to_string(dir.join("actions.jsonl")).unwrap_or_default();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    assert!(log.contains("action"), "log: {log}");
+    assert!(log.contains("kill"), "log: {log}");
+    assert!(log.contains(&pid.to_string()), "log: {log}");
+    assert!(log.contains("user_requested"), "log: {log}");
+}
+
+#[test]
+fn killing_a_process_that_is_not_there_fails() {
+    let out = sentinel(&["kill", "999999999", "--yes"]);
+
+    assert!(!out.status.success(), "exit status: {:?}", out.status);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("999999999"), "stderr: {stderr}");
+}
+
 #[test]
 fn a_bad_interval_is_refused() {
     let out = sentinel(&["health", "--interval", "fast"]);

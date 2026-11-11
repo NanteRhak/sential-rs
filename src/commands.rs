@@ -19,7 +19,7 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
         Command::Watch => Err("watch is not implemented yet".into()),
         Command::Alerts { last } => alerts(config, last),
         Command::Inspect { pid } => inspect(config, pid),
-        Command::Kill => Err("kill is not implemented yet".into()),
+        Command::Kill { pid, yes, dry_run } => kill(config, pid, yes, dry_run),
         Command::Suspend => Err("suspend is not implemented yet".into()),
         Command::Resume => Err("resume is not implemented yet".into()),
         Command::Renice => Err("renice is not implemented yet".into()),
@@ -103,6 +103,98 @@ pub fn sampler(config: &Config, interval: std::time::Duration) -> Sampler {
             }
         }),
     )
+}
+
+/// Terminate a process, carefully.
+fn kill(config: Config, pid: u32, yes: bool, dry_run: bool) -> Result<(), String> {
+    let Some(name) = crate::action::process_name(pid) else {
+        return Err(format!("no process {pid}"));
+    };
+    let Some(start_time) = crate::action::start_time(pid) else {
+        return Err(format!("no process {pid}"));
+    };
+
+    if let Some(rule) = crate::action::protection(&name, &config.critical_processes.names) {
+        let result = format!("refused: protected by the {rule} rule");
+        record_action(&config, "kill", pid, &name, "user asked", &result);
+        return Err(format!(
+            "{name} is protected by the critical_processes rule ({rule})"
+        ));
+    }
+
+    if dry_run {
+        let result = "dry run: nothing was sent".to_string();
+        record_action(&config, "kill", pid, &name, "user asked", &result);
+        println!("would kill {name} ({pid}) with SIGTERM");
+        return Ok(());
+    }
+
+    if config.actions.confirm && !yes && !confirm(&format!("Kill {name} ({pid})? [y/N] ")) {
+        let result = "refused: the user said no".to_string();
+        record_action(&config, "kill", pid, &name, "user asked", &result);
+        return Err("cancelled".into());
+    }
+
+    // The PID may have been given to another process while we were asking.
+    if crate::action::start_time(pid) != Some(start_time) {
+        let result = "refused: the process changed".to_string();
+        record_action(&config, "kill", pid, &name, "user asked", &result);
+        return Err(format!(
+            "process {pid} changed while confirming, refusing to kill it"
+        ));
+    }
+
+    match crate::action::send_signal(pid, libc::SIGTERM) {
+        Ok(()) => {
+            let result = "sent SIGTERM".to_string();
+            record_action(&config, "kill", pid, &name, "user asked", &result);
+            println!("sent SIGTERM to {name} ({pid})");
+            Ok(())
+        }
+        Err(error) => {
+            let result = format!("failed: {error}");
+            record_action(&config, "kill", pid, &name, "user asked", &result);
+            Err(error)
+        }
+    }
+}
+
+/// Ask the user a yes or no question.
+fn confirm(question: &str) -> bool {
+    use std::io::Write;
+    print!("{question}");
+    let _ = std::io::stdout().flush();
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return false;
+    }
+    matches!(answer.trim(), "y" | "Y" | "yes" | "Yes")
+}
+
+/// Write an action to the action log.
+fn record_action(
+    config: &Config,
+    action: &str,
+    pid: u32,
+    process_name: &str,
+    reason: &str,
+    result: &str,
+) {
+    let Some(path) = &config.actions.log_file else {
+        return;
+    };
+    let record = crate::action::ActionRecord {
+        timestamp: crate::collect::now_millis(),
+        action: action.to_string(),
+        pid,
+        process_name: process_name.to_string(),
+        reason: reason.to_string(),
+        user_requested: true,
+        result: result.to_string(),
+    };
+    if let Err(error) = crate::action::write_record(path, &record) {
+        eprintln!("sentinel: {error}");
+    }
 }
 
 /// The alerts of the last window, read back from the log file.

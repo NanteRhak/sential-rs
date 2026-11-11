@@ -63,7 +63,16 @@ pub enum Command {
         pid: u32,
     },
     /// Terminate a process safely
-    Kill,
+    Kill {
+        /// The process to terminate
+        pid: u32,
+        /// Do not ask for confirmation
+        #[arg(long)]
+        yes: bool,
+        /// Say what would happen without doing it
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Suspend a process
     Suspend,
     /// Resume a process
