@@ -25,8 +25,8 @@ ten seconds ago, which process spiked for 200 ms, and what to do about it.
 ┌ CPU % ─────────────────┐┌ Memory % ──────────────┐┌ Disk bytes/s ──────────┐┌ Network bytes/s ───────┐
 │                        ││                        ││████████████████████████││████████████████████████│
 │                        ││                        ││████████████████████████││████████████████████████│
-│                        ││      ▁      ▁      ▁   ││████████████████████████││████████████████████████│
-│                        ││████████████████████████││████████████████████████││████████████████████████│
+│                        ││                        ││████████████████████████││████████████████████████│
+│                        ││                        ││████████████████████████││████████████████████████│
 │       ▁▂▃▄▄       ▁▂▃▄▄││████████████████████████││████████████████████████││████████████████████████│
 │▃▄▅▆▇███████▃▄▅▆▇███████││████████████████████████││████████████████████████││████████████████████████│
 └────────────────────────┘└────────────────────────┘└────────────────────────┘└────────────────────────┘
@@ -37,7 +37,6 @@ ten seconds ago, which process spiked for 200 ms, and what to do about it.
 │3        you          9.1     64.0    backup-agent                                                    │
 │4        postgres     2.2     16.0    postgres                                                        │
 │1        root         0.2     0.8     systemd                                                         │
-│                                                                                                      │
 │                                                                                                      │
 │                                                                                                      │
 │                                                                                                      │
@@ -61,6 +60,7 @@ real dashboard and not a drawing of one.</sub>
 - [Running it as a service](#running-it-as-a-service)
 - [How it works](#how-it-works)
 - [Development](#development)
+- [Project structure](#project-structure)
 - [Known limits](#known-limits)
 - [License](#license)
 
@@ -146,17 +146,17 @@ Disk
   Device sda        read 0 B/s  write 0 B/s  0 ops read/s  0 ops write/s
   Filesystem /      136.5 GiB used of 168.6 GiB (81.0%)
   Filesystem /boot/efi24.6 MiB used of 511.0 MiB (4.8%)
-  Filesystem /run/media/nante/Stockage1567.6 GiB used of 710.8 GiB (79.8%)
+  Filesystem /run/media/you/Backup1567.6 GiB used of 710.8 GiB (79.8%)
 
 Network
   Throughput        received 0 B/s  sent 431 B/s
   Packets           0/s received  3/s sent
   Errors            0  drops 0
-  Interface enp3s0  received 0 B/s  sent 0 B/s  0/s in  0/s out  errors 0  drops 0
-  Interface wlp2s0  received 0 B/s  sent 431 B/s  0/s in  3/s out  errors 0  drops 0
+  Interface eth0    received 0 B/s  sent 0 B/s  0/s in  0/s out  errors 0  drops 0
+  Interface wlan0   received 0 B/s  sent 431 B/s  0/s in  3/s out  errors 0  drops 0
 
 Sensors
-  Temperature       acpitz 52.0°C  x86_pkg_temp 60.0°C  hwmon1 temp1 52.0°C  hwmon1 temp2 52.0°C  Package id 0 64.0°C  Core 0 63.0°C  Core 1 63.0°C
+  Temperature       acpi 52.0°C  cpu_package 60.0°C  hwmon1 temp1 52.0°C  hwmon1 temp2 52.0°C  Package id 0 64.0°C  Core 0 63.0°C  Core 1 63.0°C
   Fans              no readable sensors
   Throttling        no
   Pressure stall    cpu 0.4%  memory 0.0%  io 1.0%
@@ -167,9 +167,9 @@ The processes, ordered by the resource you care about:
 ```console
 $ sentinel ps --sort pressure
     PID     PPID  USER        STATE    CPU%    ELAPSED         RSS         VSZ    MEM%     PRS  NAME
-  92063        1  nante       S        0.9    4:49:27   599.8 MiB    20.4 GiB    7.7%    3.1  firefox
-  98328    97033  nante       S        4.7    2:53:55   653.7 MiB    13.3 GiB    8.4%    2.1  opencode
- 243358   243347  nante       R        4.7      00:01     4.6 MiB     5.8 MiB    0.1%    1.0  sentinel
+  92063        1  you         S        0.9    4:49:27   599.8 MiB    20.4 GiB    7.7%    3.1  firefox
+  98328    97033  you         S        4.7    2:53:55   653.7 MiB    13.3 GiB    8.4%    2.1  opencode
+ 243358   243347  you         R        4.7      00:01     4.6 MiB     5.8 MiB    0.1%    1.0  sentinel
 ```
 
 The same list, for a script:
@@ -205,6 +205,101 @@ sent SIGTERM to backup-agent (12345)
 ```
 
 ## Commands
+
+The command line is organized around four things you might want to do. Every
+command also accepts `--help`, which lists all of its options.
+
+### Look at the machine
+
+`sentinel health` prints everything the machine is doing right now — CPU,
+memory, disks, network, temperatures — in one screen (see the example above).
+`sentinel top` is its process-focused cousin: the busiest processes, printed
+once, then it exits.
+
+```console
+$ sentinel top
+```
+
+If you want the process list with more columns, use `sentinel ps`. Sort it by
+CPU, memory, name or by the **pressure score** — a single number that combines
+how much CPU, memory, disk, network and file descriptors a process is using:
+
+```console
+$ sentinel ps --sort mem --json
+```
+
+Add `--json` to any of these and you get machine-readable output, ready to
+pipe into `jq` or another script.
+
+### Watch for problems
+
+`sentinel watch` samples the machine many times a second. Use it when
+something happens for a moment and is gone before a slower tool can see it —
+a CPU spike, a burst of disk writes. In this example, it samples five times a
+second for ten seconds and prints the peaks:
+
+```console
+$ sentinel watch --interval 200ms --duration 10s
+```
+
+`sentinel report` looks backwards instead: it reads the history on disk and
+summarizes the recent past — peaks, averages, and which processes were the
+hungriest (see the example above). `sentinel alerts` lists the alerts that
+have been raised, read back from the alert log:
+
+```console
+$ sentinel alerts --last 1h
+```
+
+### Deal with a runaway process
+
+Start with `sentinel inspect <pid>`: it prints everything known about one
+process — who started it, how much of everything it is using, how long it has
+been running, and its cgroup.
+
+```console
+$ sentinel inspect 12345
+```
+
+Then decide. `sentinel kill` stops the process, but not carelessly: it asks
+you first, it sends the polite termination signal (SIGTERM) so the process
+can clean up after itself, and it writes the action to the action log. If you
+want to see what would happen without doing it, use `--dry-run`:
+
+```console
+$ sentinel kill 12345 --dry-run
+```
+
+Other options, same safety rules:
+
+- `sentinel suspend <pid>` — pause the process without ending it, and
+  `sentinel resume <pid>` to continue it later.
+- `sentinel renice <pid> <value>` — make the process lower or higher priority,
+  so it bothers the rest of the machine less without being killed.
+- `sentinel limit <pid> --cpu 50 --memory 20` — put the process under a cgroup
+  so it may use at most 50% of one CPU core and 20% of memory. Remove the cap
+  with `--remove`. (Needs root or a delegated cgroup; if you do not have it,
+  the command says so.)
+
+Every action asks for confirmation first. The `--yes` flag skips the question
+for scripts, and `--dry-run` works on all of them. A list of protected
+processes in the configuration file is never touched by an automatic action.
+
+### Keep an eye on things in the background
+
+`sentinel tui` opens the live dashboard, refreshed once a second (see
+[The dashboard](#the-dashboard)). `sentinel daemon` runs headless — no
+terminal interface — sampling in the background, raising alerts and applying
+policies, for as long as it runs:
+
+```console
+$ sentinel daemon --duration 1h --log-file sentinel.log
+```
+
+This is the mode used by the systemd service described in
+[Running it as a service](#running-it-as-a-service).
+
+### Quick reference
 
 | Command | What it does |
 | --- | --- |
@@ -455,6 +550,34 @@ cargo run --example dashboard   # render the dashboard as text
 The work is tracked as 32 tracer-bullet tickets in
 [`.scratch/system-sentinel/issues/`](.scratch/system-sentinel/issues/), one
 commit per ticket.
+
+## Project structure
+
+The source lives in `src/`, organized around the flow shown above — from the
+raw system files to what you see on the screen:
+
+```text
+src/
+├── collect/        # one file per source: /proc, filesystems, network,
+│                   # processes, sensors — each knows how to read its files
+├── core/           # the metric and formatting types shared by the CLI,
+│                   # the dashboard and the daemon
+├── tui/            # the live dashboard
+├── commands.rs     # the CLI: what each command does, in terms of the below
+├── config.rs       # reads and validates sentinel.toml
+├── sample.rs       # the sampler: turns raw readings into rates and history
+├── alert.rs        # decides when something deserves an alert
+├── policy.rs       # decides what to do about it
+├── action.rs       # does it: kill, suspend, renice, cgroup limits
+├── oom.rs          # reads the kernel log for OOM-killer evidence
+├── history.rs      # keeps the recent past, on disk and in memory
+└── report.rs       # summarizes that history for `sentinel report`
+tests/              # tests that run the real binary end to end
+examples/           # dashboard.rs — renders the dashboard without a terminal
+```
+
+In short: `collect/` gathers, `sample.rs` measures, `alert.rs` and
+`policy.rs` decide, `action.rs` acts, and `commands.rs` plus `tui/` show it.
 
 ## Known limits
 
