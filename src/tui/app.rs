@@ -6,7 +6,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Sparkline, Table};
+use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState};
 
 use crate::action;
 use crate::config::Config;
@@ -250,25 +250,19 @@ impl App {
         App::new(shared)
     }
 
-    /// An app showing a known set of samples, for tests.
+    /// An app showing a known system sample, for tests.
     #[cfg(test)]
-    pub fn with_history(history: Vec<SystemSample>) -> App {
-        let shared = Arc::new(Shared::default());
-        for (index, system) in history.into_iter().enumerate() {
-            shared.publish(
-                Arc::new(SamplerState {
-                    tick: index as u64,
-                    system,
-                    processes: Vec::new(),
-                    alerts: Vec::new(),
-                    exits: Vec::new(),
-                    restart_loops: Vec::new(),
-                    proposals: Vec::new(),
-                }),
-                std::time::Duration::from_secs(600),
-            );
-        }
-        App::new(shared)
+    pub fn with_system(system: SystemSample) -> App {
+        let state = SamplerState {
+            tick: 1,
+            system,
+            processes: Vec::new(),
+            alerts: Vec::new(),
+            exits: Vec::new(),
+            restart_loops: Vec::new(),
+            proposals: Vec::new(),
+        };
+        App::new(Arc::new(Shared::default())).with_state(state)
     }
 
     #[cfg(test)]
@@ -288,6 +282,7 @@ impl App {
             Some(Resource::Io) => Some(Resource::Network),
             Some(Resource::Network) => None,
         };
+        self.clamp_selection();
     }
 
     /// Start typing a search.
@@ -315,6 +310,7 @@ impl App {
             } else {
                 Some(typing)
             };
+            self.clamp_selection();
         }
     }
 
@@ -343,11 +339,6 @@ impl App {
         self.shared.state()
     }
 
-    /// The recent samples, oldest first.
-    pub fn history(&self) -> Vec<Arc<SamplerState>> {
-        self.shared.history()
-    }
-
     /// The rows the table shows: narrowed by the filter and the search, then
     /// ordered. The collection keeps running underneath; only the view changes.
     pub fn rows(&self) -> Vec<ProcessSample> {
@@ -365,22 +356,42 @@ impl App {
 
     pub fn draw(&self, frame: &mut Frame) {
         let area = frame.area();
+        let sample = &self.snapshot().system;
+        let top_height = cpu_height(sample).max(11);
         let panes = Layout::vertical([
-            Constraint::Length(8),
+            Constraint::Length(top_height),
+            Constraint::Length(5),
             Constraint::Length(4),
-            Constraint::Length(8),
-            Constraint::Min(4),
+            Constraint::Min(6),
+            Constraint::Length(1),
         ])
         .split(area);
-        self.draw_summary(frame, panes[0]);
-        self.draw_alerts(frame, panes[1]);
-        self.draw_graphs(frame, panes[2]);
+        let top = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(panes[0]);
+        let right = Layout::vertical([Constraint::Length(6), Constraint::Min(5)]).split(top[1]);
+        self.draw_cpu(frame, top[0]);
+        self.draw_memory(frame, right[0]);
+        self.draw_network(frame, right[1]);
+        self.draw_disk(frame, panes[1]);
+        self.draw_alerts(frame, panes[2]);
         self.draw_processes(frame, panes[3]);
+        self.draw_footer(frame, panes[4]);
+    }
+
+    /// The key hints, or the result of the last action.
+    fn draw_footer(&self, frame: &mut Frame, area: Rect) {
+        let text = if self.status.is_empty() {
+            " q quit   t/m/i/N sort   f filter   / search   ↑↓ select   enter detail   a actions"
+                .to_string()
+        } else {
+            format!(" {}", self.status)
+        };
+        frame.render_widget(Paragraph::new(text), area);
     }
 
     /// The recent alerts, with their severity.
     fn draw_alerts(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title(" Alerts ");
+        let block = panel("Alerts");
         let state = self.snapshot();
         let exits = &state.exits;
         let alerts = &state.alerts;
@@ -425,7 +436,7 @@ impl App {
 
     /// The action menu for the selected process.
     fn draw_menu(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title(" Actions ");
+        let block = panel("Actions");
         let Some(process) = self.selected_process() else {
             frame.render_widget(Paragraph::new("no process selected").block(block), area);
             return;
@@ -477,46 +488,135 @@ impl App {
         frame.render_widget(Paragraph::new(lines).block(block), area);
     }
 
-    /// The usage graphs, drawn from the recent history.
-    fn draw_graphs(&self, frame: &mut Frame, area: Rect) {
-        let history = self.history();
-        let graphs = [
-            ("CPU %", cpu_series(&history), 100),
-            ("Memory %", memory_series(&history), 100),
-            ("Disk bytes/s", disk_series(&history), 0),
-            ("Network bytes/s", network_series(&history), 0),
-        ];
-        let columns = Layout::horizontal([Constraint::Ratio(1, 4); 4]).split(area);
-        for (index, (title, series, max)) in graphs.into_iter().enumerate() {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" {title} "));
-            if series.len() < 2 {
-                frame.render_widget(Paragraph::new("no data").block(block), columns[index]);
-                continue;
-            }
-            let peak = match max {
-                0 => series.iter().copied().max().unwrap_or(1).max(1),
-                fixed => fixed,
-            };
-            let sparkline = Sparkline::default()
-                .data(&series)
-                .max(peak)
-                .style(Style::default().fg(Color::Green));
-            frame.render_widget(sparkline.block(block), columns[index]);
-        }
-    }
-
-    fn draw_summary(&self, frame: &mut Frame, area: Rect) {
+    /// The CPU meters: the totals, the load and one meter per core.
+    fn draw_cpu(&self, frame: &mut Frame, area: Rect) {
         let sample = &self.snapshot().system;
         let mut lines = vec![summary_line("CPU", &cpu_summary(sample))];
-        lines.push(summary_line("Memory", &memory_summary(sample)));
-        lines.push(summary_line("Disk", &disk_summary(sample)));
-        lines.push(summary_line("Network", &network_summary(sample)));
-        lines.push(summary_line("Temperature", &temperature_summary(sample)));
-        lines.push(summary_line("Load", &load_summary(sample)));
-        let block = Block::default().borders(Borders::ALL).title(" System ");
-        frame.render_widget(Paragraph::new(lines).block(block), area);
+        lines.push(summary_line(
+            "Load",
+            &format!("{}   {}", load_summary(sample), temperature_summary(sample)),
+        ));
+        let cores = &sample.cpu.per_core_percent;
+        let per_line = cores_per_line(cores.len());
+        let rows = cores.len().div_ceil(per_line);
+        let chunks = rows.min(MAX_CORE_ROWS - usize::from(rows > MAX_CORE_ROWS));
+        for row in 0..chunks {
+            let mut spans = Vec::new();
+            let start = row * per_line;
+            let end = ((row + 1) * per_line).min(cores.len());
+            for (core, percent) in cores.iter().enumerate().take(end).skip(start) {
+                if core > start {
+                    spans.push(Span::raw(" "));
+                }
+                spans.push(Span::raw(format!("{core:>2} ")));
+                spans.extend(meter_spans(*percent, if per_line == 1 { 24 } else { 5 }));
+                spans.push(Span::raw(format!(" {percent:>3.0}%")));
+            }
+            lines.push(Line::from(spans));
+        }
+        if rows > MAX_CORE_ROWS {
+            lines.push(Line::from(format!(
+                " +{} more cores",
+                cores.len() - chunks * per_line
+            )));
+        }
+        frame.render_widget(Paragraph::new(lines).block(panel("CPU")), area);
+    }
+
+    fn draw_memory(&self, frame: &mut Frame, area: Rect) {
+        let sample = &self.snapshot().system;
+        let memory = &sample.memory;
+        let percent = if memory.total_bytes == 0 {
+            0.0
+        } else {
+            memory.used_bytes as f64 / memory.total_bytes as f64 * 100.0
+        };
+        let mut meter = vec![Span::styled(
+            format!("{:<10}", "Used"),
+            Style::default().fg(Color::Cyan),
+        )];
+        meter.extend(meter_spans(percent, 12));
+        meter.push(Span::raw(format!(
+            " {percent:.0}%  free {}",
+            bytes_to_human(memory.available_bytes)
+        )));
+        let lines = vec![
+            summary_line(
+                "Memory",
+                &format!(
+                    "{} used / {}",
+                    bytes_to_human(memory.used_bytes),
+                    bytes_to_human(memory.total_bytes)
+                ),
+            ),
+            Line::from(meter),
+            summary_line(
+                "Cached",
+                &format!(
+                    "{}   Buffers {}",
+                    bytes_to_human(memory.cached_bytes),
+                    bytes_to_human(memory.buffers_bytes)
+                ),
+            ),
+            summary_line(
+                "Swap",
+                &format!(
+                    "{} used / {}",
+                    bytes_to_human(memory.swap_used_bytes),
+                    bytes_to_human(memory.swap_total_bytes)
+                ),
+            ),
+        ];
+        frame.render_widget(Paragraph::new(lines).block(panel("Memory")), area);
+    }
+
+    fn draw_disk(&self, frame: &mut Frame, area: Rect) {
+        let sample = &self.snapshot().system;
+        let mut lines = vec![summary_line("Disk", &disk_summary(sample))];
+        if !sample.disk.devices.is_empty() {
+            let devices = sample
+                .disk
+                .devices
+                .iter()
+                .map(|device| {
+                    format!(
+                        "{} r {} w {}",
+                        device.device,
+                        bytes_to_human(device.read_bytes_per_sec),
+                        bytes_to_human(device.write_bytes_per_sec)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("  ");
+            lines.push(summary_line("Devices", &devices));
+        }
+        if !sample.disk.filesystems.is_empty() {
+            let filesystems = sample
+                .disk
+                .filesystems
+                .iter()
+                .map(filesystem_summary)
+                .collect::<Vec<_>>()
+                .join("  ");
+            lines.push(summary_line("Mounts", &filesystems));
+        }
+        frame.render_widget(Paragraph::new(lines).block(panel("Disk")), area);
+    }
+
+    fn draw_network(&self, frame: &mut Frame, area: Rect) {
+        let sample = &self.snapshot().system;
+        let mut lines = vec![summary_line("Network", &network_summary(sample))];
+        for interface in &sample.network.interfaces {
+            lines.push(summary_line(
+                &interface.name,
+                &format!(
+                    "received {}  sent {}",
+                    bytes_to_human(interface.rx_bytes_per_sec),
+                    bytes_to_human(interface.tx_bytes_per_sec)
+                ),
+            ));
+        }
+        frame.render_widget(Paragraph::new(lines).block(panel("Network")), area);
     }
 
     fn draw_processes(&self, frame: &mut Frame, area: Rect) {
@@ -538,13 +638,7 @@ impl App {
         ]);
         let rows: Vec<Row> = processes
             .iter()
-            .enumerate()
-            .map(|(index, process)| {
-                let style = if index == self.selected {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                };
+            .map(|process| {
                 Row::new(vec![
                     Cell::from(process.pid.to_string()),
                     Cell::from(process.user.clone()),
@@ -555,10 +649,9 @@ impl App {
                         &self.config.critical_processes.names,
                     )),
                 ])
-                .style(style)
             })
             .collect();
-        let title = format!(" Processes ({}) | {} ", processes.len(), self.status_line());
+        let title = format!("Processes ({}) | {}", processes.len(), self.status_line());
         let table = Table::new(
             rows,
             [
@@ -571,8 +664,11 @@ impl App {
         )
         .header(header)
         .row_highlight_style(Style::default().fg(Color::Yellow))
-        .block(Block::default().borders(Borders::ALL).title(title));
-        frame.render_widget(table, table_area);
+        .block(panel(&title));
+        // The table scrolls itself to keep the selected row on screen.
+        let selected = (self.selected < processes.len()).then_some(self.selected);
+        let mut state = TableState::new().with_selected(selected);
+        frame.render_stateful_widget(table, table_area, &mut state);
         if let Some(side_area) = side_area {
             if self.menu.is_some() {
                 self.draw_menu(frame, side_area);
@@ -582,14 +678,14 @@ impl App {
         }
     }
 
-    /// The detail of the selected process, with its recent usage.
+    /// The detail of the selected process.
     fn draw_detail(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title(" Detail ");
+        let block = panel("Detail");
         let Some(process) = self.selected_process() else {
             frame.render_widget(Paragraph::new("no process selected").block(block), area);
             return;
         };
-        let mut lines: Vec<Line> = vec![
+        let lines: Vec<Line> = vec![
             Line::from(format!("{} ({})", process.name, process.pid)),
             Line::from(format!(
                 "parent {}  user {}  started {}",
@@ -620,25 +716,6 @@ impl App {
                 process.cgroup.as_deref().unwrap_or("not readable")
             )),
         ];
-        let series = self.process_series(process.pid);
-        if series.len() >= 2 {
-            let graph = Layout::vertical([Constraint::Min(3), Constraint::Length(3)]).split(area);
-            frame.render_widget(Paragraph::new(lines).block(block), graph[0]);
-            let sparkline = Sparkline::default()
-                .data(&series)
-                .max(100)
-                .style(Style::default().fg(Color::Green));
-            frame.render_widget(
-                sparkline.block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Recent CPU % "),
-                ),
-                graph[1],
-            );
-            return;
-        }
-        lines.push(Line::from("no usage history yet"));
         frame.render_widget(Paragraph::new(lines).block(block), area);
     }
 
@@ -647,58 +724,67 @@ impl App {
         self.rows().get(self.selected).cloned()
     }
 
-    /// The CPU usage of a process over the recent history.
-    pub fn process_series(&self, pid: u32) -> Vec<u64> {
-        self.history()
-            .iter()
-            .filter_map(|state| {
-                state
-                    .processes
-                    .iter()
-                    .find(|process| process.pid == pid)
-                    .map(|process| process.cpu_percent.round() as u64)
-            })
-            .collect()
+    /// Keep the selection on a row after the list shrinks.
+    pub fn clamp_selection(&mut self) {
+        let last = self.rows().len().saturating_sub(1);
+        self.selected = self.selected.min(last);
     }
 }
 
-/// The CPU percentage of each sample in the history.
-pub fn cpu_series(history: &[Arc<SamplerState>]) -> Vec<u64> {
-    history
-        .iter()
-        .map(|state| state.system.cpu.total_percent.round() as u64)
-        .collect()
+/// The most lines of core meters the CPU box shows before it summarises the rest.
+const MAX_CORE_ROWS: usize = 8;
+
+/// A boxed pane with a coloured title.
+fn panel(title: &str) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default().fg(Color::Cyan),
+        ))
 }
 
-/// The memory percentage of each sample in the history.
-pub fn memory_series(history: &[Arc<SamplerState>]) -> Vec<u64> {
-    history
-        .iter()
-        .map(|state| {
-            let memory = &state.system.memory;
-            if memory.total_bytes == 0 {
-                0
-            } else {
-                (memory.used_bytes as f64 / memory.total_bytes as f64 * 100.0).round() as u64
-            }
-        })
-        .collect()
+/// How tall the CPU box needs to be for its core meters.
+fn cpu_height(sample: &SystemSample) -> u16 {
+    let cores = sample.cpu.per_core_percent.len();
+    let rows = cores.div_ceil(cores_per_line(cores));
+    4 + rows.min(MAX_CORE_ROWS) as u16
 }
 
-/// The disk throughput of each sample in the history.
-pub fn disk_series(history: &[Arc<SamplerState>]) -> Vec<u64> {
-    history
-        .iter()
-        .map(|state| state.system.disk.read_bytes_per_sec + state.system.disk.write_bytes_per_sec)
-        .collect()
+/// One core per line while they fit; three with a gap per line on machines with many.
+fn cores_per_line(cores: usize) -> usize {
+    if cores > MAX_CORE_ROWS { 3 } else { 1 }
 }
 
-/// The network throughput of each sample in the history.
-pub fn network_series(history: &[Arc<SamplerState>]) -> Vec<u64> {
-    history
-        .iter()
-        .map(|state| state.system.network.rx_bytes_per_sec + state.system.network.tx_bytes_per_sec)
-        .collect()
+/// A small bar, green when idle and red when busy.
+fn meter_spans(percent: f64, width: usize) -> Vec<Span<'static>> {
+    let filled = ((percent.clamp(0.0, 100.0) / 100.0) * width as f64).round() as usize;
+    let colour = match percent {
+        percent if percent >= 80.0 => Color::Red,
+        percent if percent >= 50.0 => Color::Yellow,
+        _ => Color::Green,
+    };
+    let frame = Style::default().fg(Color::DarkGray);
+    vec![
+        Span::styled("[", frame),
+        Span::styled("█".repeat(filled), Style::default().fg(colour)),
+        Span::styled("░".repeat(width - filled), frame),
+        Span::styled("]", frame),
+    ]
+}
+
+fn filesystem_summary(filesystem: &crate::core::metrics::FilesystemSample) -> String {
+    let percent = if filesystem.total_bytes == 0 {
+        0.0
+    } else {
+        filesystem.used_bytes as f64 / filesystem.total_bytes as f64 * 100.0
+    };
+    format!(
+        "{} {percent:.0}% of {}",
+        filesystem.mount_point,
+        bytes_to_human(filesystem.total_bytes)
+    )
 }
 
 /// Whether a process is using the resource the table is narrowed to.
@@ -725,29 +811,18 @@ pub fn sort_label(sort: Sort) -> &'static str {
 
 fn summary_line(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label:<14}"), Style::default().fg(Color::Cyan)),
+        Span::styled(format!("{label:<10}"), Style::default().fg(Color::Cyan)),
         Span::raw(value.to_string()),
     ])
 }
 
 fn cpu_summary(sample: &SystemSample) -> String {
     format!(
-        "{:.1}%  user {:.1}%  system {:.1}%  iowait {:.1}%  idle {:.1}%",
+        "{:.1}%  user {:.1}%  sys {:.1}%  iowait {:.1}%",
         sample.cpu.total_percent,
         sample.cpu.user_percent,
         sample.cpu.system_percent,
-        sample.cpu.iowait_percent,
-        sample.cpu.idle_percent
-    )
-}
-
-fn memory_summary(sample: &SystemSample) -> String {
-    format!(
-        "{} used of {}, {} available, {} swap",
-        bytes_to_human(sample.memory.used_bytes),
-        bytes_to_human(sample.memory.total_bytes),
-        bytes_to_human(sample.memory.available_bytes),
-        bytes_to_human(sample.memory.swap_used_bytes)
+        sample.cpu.iowait_percent
     )
 }
 
@@ -816,34 +891,53 @@ mod tests {
     }
 
     #[test]
-    fn the_graph_pane_draws_the_recent_history() {
-        let history: Vec<SystemSample> = (0..10)
-            .map(|index| SystemSample {
-                cpu: crate::core::metrics::CpuSample {
-                    total_percent: index as f64 * 5.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
+    fn a_meter_is_framed_and_filled_by_percentage() {
+        let bar: String = meter_spans(50.0, 4)
+            .iter()
+            .map(|span| span.content.as_ref())
             .collect();
-        let app = App::with_history(history);
 
-        let text = render(&app, 120, 40);
-
-        assert!(text.contains("CPU %"), "{text}");
-        assert!(text.contains("Memory %"), "{text}");
-        assert!(text.contains("Disk bytes/s"), "{text}");
-        assert!(text.contains("Network bytes/s"), "{text}");
-        assert!(!text.contains("no data"), "{text}");
+        assert_eq!(bar, "[██░░]");
     }
 
     #[test]
-    fn the_graph_pane_says_no_data_before_there_is_a_history() {
-        let app = App::with_processes(vec![]);
+    fn the_boxes_show_per_core_disk_and_network_detail() {
+        let sample = SystemSample {
+            cpu: crate::core::metrics::CpuSample {
+                per_core_percent: vec![10.0, 20.0, 30.0, 40.0],
+                ..Default::default()
+            },
+            disk: crate::core::metrics::DiskSample {
+                devices: vec![crate::core::metrics::DiskDeviceSample {
+                    device: "sda".into(),
+                    ..Default::default()
+                }],
+                filesystems: vec![crate::core::metrics::FilesystemSample {
+                    mount_point: "/".into(),
+                    used_bytes: 50,
+                    total_bytes: 100,
+                    available_bytes: 50,
+                }],
+                ..Default::default()
+            },
+            network: crate::core::metrics::NetworkSample {
+                interfaces: vec![crate::core::metrics::InterfaceSample {
+                    name: "eth0".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let app = App::with_system(sample);
 
         let text = render(&app, 120, 40);
 
-        assert!(text.contains("no data"), "{text}");
+        assert!(text.contains("20%"), "{text}");
+        assert!(text.contains("40%"), "{text}");
+        assert!(text.contains("sda"), "{text}");
+        assert!(text.contains("/ 50% of 100 B"), "{text}");
+        assert!(text.contains("eth0"), "{text}");
     }
 
     #[test]
@@ -987,10 +1081,10 @@ mod tests {
     fn both_panes_are_on_screen() {
         let text = render(&app(), 100, 30);
 
-        assert!(text.contains("System"), "{text}");
-        assert!(text.contains("CPU"), "{text}");
-        assert!(text.contains("Memory"), "{text}");
-        assert!(text.contains("Processes"), "{text}");
+        for title in ["CPU", "Memory", "Disk", "Network", "Alerts", "Processes"] {
+            assert!(text.contains(title), "no {title} box:\n{text}");
+        }
         assert!(text.contains("PID"), "{text}");
+        assert!(text.contains("q quit"), "{text}");
     }
 }

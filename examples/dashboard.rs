@@ -16,27 +16,21 @@ use sentinel::tui::app::App;
 
 fn main() {
     let shared = Arc::new(Shared::default());
-    // The graphs need a few samples before they have something to draw.
-    for tick in 0..40 {
-        let mut system = system();
-        system.cpu.total_percent = 8.0 + (tick % 12) as f64 * 1.7;
-        system.memory.used_bytes = 7_900_000_000 + (tick % 7) as u64 * 90_000_000;
-        shared.publish(
-            Arc::new(SamplerState {
-                tick: tick as u64,
-                system,
-                processes: processes(),
-                alerts: Vec::new(),
-                exits: Vec::new(),
-                restart_loops: Vec::new(),
-                proposals: Vec::new(),
-            }),
-            std::time::Duration::from_secs(600),
-        );
-    }
+    shared.publish(
+        Arc::new(SamplerState {
+            tick: 1,
+            system: system(),
+            processes: processes(),
+            alerts: Vec::new(),
+            exits: Vec::new(),
+            restart_loops: Vec::new(),
+            proposals: Vec::new(),
+        }),
+        std::time::Duration::from_secs(600),
+    );
 
     let app = App::new(shared);
-    print!("{}", sentinel::tui::app::render(&app, 104, 34));
+    print!("{}", sentinel::tui::app::render(&app, 104, 38));
 }
 
 fn system() -> SystemSample {

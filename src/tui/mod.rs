@@ -67,6 +67,7 @@ fn event_loop(
     mut app: App,
 ) -> Result<(), String> {
     loop {
+        app.clamp_selection();
         terminal
             .draw(|frame| app.draw(frame))
             .map_err(|error| error.to_string())?;
@@ -111,7 +112,10 @@ pub fn on_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('f') => app.cycle_filter(),
         KeyCode::Char('/') => app.start_search(),
         KeyCode::Up => app.selected = app.selected.saturating_sub(1),
-        KeyCode::Down => app.selected += 1,
+        KeyCode::Down => {
+            let last = app.rows().len().saturating_sub(1);
+            app.selected = (app.selected + 1).min(last);
+        }
         KeyCode::Enter => app.detail = !app.detail,
         KeyCode::Char('a') => app.open_menu(),
         KeyCode::Char('k') => app.choose(PolicyAction::Kill),
@@ -308,6 +312,43 @@ mod tests {
                 "the key {key} chose the wrong action"
             );
         }
+    }
+
+    #[test]
+    fn the_selection_stops_at_the_last_row() {
+        let mut app = app();
+
+        for _ in 0..10 {
+            on_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+
+        assert_eq!(app.selected, 2);
+        assert_eq!(app.selected_process().unwrap().pid, 3);
+    }
+
+    #[test]
+    fn scrolling_keeps_the_selected_row_on_screen() {
+        let processes: Vec<ProcessSample> = (0..30)
+            .map(|index| {
+                process(
+                    index + 1,
+                    &format!("proc-{index:02}"),
+                    30.0 - index as f64,
+                    0,
+                    0,
+                )
+            })
+            .collect();
+        let mut app = App::with_processes(processes);
+
+        for _ in 0..25 {
+            on_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+
+        assert_eq!(app.selected, 25);
+        let text = crate::tui::app::render(&app, 100, 34);
+        assert!(text.contains("proc-25"), "{text}");
+        assert!(!text.contains("proc-00"), "{text}");
     }
 
     #[test]

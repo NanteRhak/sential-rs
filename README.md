@@ -10,27 +10,27 @@ ten seconds ago, which process spiked for 200 ms, and what to do about it.
 [![Dependencies](https://img.shields.io/badge/dependencies-7-informational?style=flat-square)](Cargo.toml)
 
 ```text
-┌ System ──────────────────────────────────────────────────────────────────────────────────────────────┐
-│CPU           13.1%  user 9.1%  system 6.2%  iowait 0.4%  idle 81.6%                                  │
-│Memory        7.7 GiB used of 14.8 GiB, 6.8 GiB available, 1.0 GiB swap                               │
-│Disk          read 1.0 MiB  write 12.0 MiB                                                            │
-│Network       received 512.0 KiB  sent 128.0 KiB                                                      │
-│Temperature   x86_pkg_temp 57.0°C                                                                     │
-│Load          1.42 1.10 0.87                                                                          │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────┘
-┌ Alerts ──────────────────────────────────────────────────────────────────────────────────────────────┐
+╭ CPU ──────────────────────────────────────────────────╮╭ Memory ─────────────────────────────────────╮
+│CPU       18.4%  user 9.1%  sys 6.2%  iowait 0.4%      ││Memory    8.0 GiB used / 14.8 GiB            │
+│Load      1.42 1.10 0.87   x86_pkg_temp 57.0°C         ││Used      ██████░░░░░░ 54%  free 6.8 GiB     │
+│ 0 ███░░░░░░░░░░░░░░░░░░░░░  12%                       ││Cached    3.3 GiB   Buffers 86.8 MiB         │
+│ 1 ████████░░░░░░░░░░░░░░░░  32%                       ││Swap      1.0 GiB used / 7.5 GiB             │
+│ 2 ██░░░░░░░░░░░░░░░░░░░░░░   9%                       │╰─────────────────────────────────────────────╯
+│ 3 █████░░░░░░░░░░░░░░░░░░░  23%                       │╭ Network ────────────────────────────────────╮
+│                                                       ││Network   received 512.0 KiB  sent 128.0 KiB │
+│                                                       ││wlp2s0    received 512.0 KiB  sent 128.0 KiB │
+│                                                       ││                                             │
+╰───────────────────────────────────────────────────────╯╰─────────────────────────────────────────────╯
+╭ Disk ────────────────────────────────────────────────────────────────────────────────────────────────╮
+│Disk      read 1.0 MiB  write 12.0 MiB                                                                │
+│Devices   nvme0n1 r 1.0 MiB w 12.0 MiB                                                                │
+│Mounts    / 80% of 168.6 GiB                                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Alerts ──────────────────────────────────────────────────────────────────────────────────────────────╮
 │no alerts                                                                                             │
 │                                                                                                      │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────┘
-┌ CPU % ─────────────────┐┌ Memory % ──────────────┐┌ Disk bytes/s ──────────┐┌ Network bytes/s ───────┐
-│                        ││                        ││████████████████████████││████████████████████████│
-│                        ││                        ││████████████████████████││████████████████████████│
-│                        ││                        ││████████████████████████││████████████████████████│
-│                        ││                        ││████████████████████████││████████████████████████│
-│       ▁▂▃▄▄       ▁▂▃▄▄││████████████████████████││████████████████████████││████████████████████████│
-│▃▄▅▆▇███████▃▄▅▆▇███████││████████████████████████││████████████████████████││████████████████████████│
-└────────────────────────┘└────────────────────────┘└────────────────────────┘└────────────────────────┘
-┌ Processes (5) | sort: cpu ───────────────────────────────────────────────────────────────────────────┐
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Processes (5) | sort: cpu ───────────────────────────────────────────────────────────────────────────╮
 │PID      USER         CPU%    MEM%    NAME                                                            │
 │5        you          44.7    32.0    rustc                                                           │
 │2        you          18.4    38.2    firefox                                                         │
@@ -42,7 +42,12 @@ ten seconds ago, which process spiked for 200 ms, and what to do about it.
 │                                                                                                      │
 │                                                                                                      │
 │                                                                                                      │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────┘
+│                                                                                                      │
+│                                                                                                      │
+│                                                                                                      │
+│                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ q quit   t/m/i/N sort   f filter   / search   ↑↓ select   enter detail   a actions                     
 ```
 
 <sub>The picture above is rendered by `cargo run --example dashboard`, so it is the
@@ -324,8 +329,10 @@ written to the action log.
 
 ## The dashboard
 
-`sentinel tui` opens a live dashboard: the system summary, the recent alerts,
-four usage graphs and the process table, refreshing once a second.
+`sentinel tui` opens a live dashboard in the spirit of btop: boxes for CPU
+(with a meter per core), memory, disk and network, then the recent alerts and
+the process table, refreshing once a second. Boxes are drawn with rounded
+borders and colour-coded meters (green, yellow, red).
 
 | Key | What it does |
 | --- | --- |
@@ -333,7 +340,7 @@ four usage graphs and the process table, refreshing once a second.
 | `t` `m` `i` `N` | Sort by CPU, memory, disk I/O, network |
 | `f` | Narrow the table to one resource |
 | `/` | Search by process name |
-| `↑` `↓` | Move the selection |
+| `↑` `↓` | Move the selection; the table scrolls to follow it |
 | `Enter` | Open the detail panel |
 | `a` | Open the action menu |
 | `k` `s` `r` `n` | Kill, suspend, resume, renice the selected process |
