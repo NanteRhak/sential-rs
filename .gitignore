@@ -1,4 +1,7 @@
 /target
 
+# Release artifacts from `make package`; never committed.
+/build/
+
 # Private documentation: kept on this machine, never published.
 /project/
