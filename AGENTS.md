@@ -29,8 +29,7 @@ Rust System Sentinel (`sentinel`): a Linux-only monitoring TUI/CLI reading `/pro
   layouts). Describe what the tool reads (`/proc`, `sysfs`, ...), not this machine.
 
 - Commit policy: always ask before committing. When committing, the message
-  must be detailed — a bullet list of each change, plus a short
-  "Changes vs previous commit" summary.
+  must be detailed — a bullet list of each change.
 
 - Versioning: the user bumps `Cargo.toml` manually. Agent's job is to notice
   when a bump is warranted and suggest the version number — never bump,
