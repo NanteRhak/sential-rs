@@ -112,13 +112,13 @@ jobs:
 
           %install
           install -Dm755 ${GITHUB_WORKSPACE}/target/release/sentinel %{buildroot}%{_bindir}/sentinel
-          install -Dm644 ${GITHUB_WORKSPACE}/packaging/systemd/sentinel.service %{buildroot}%{_unitdir}/sentinel.service
+          install -Dm644 ${GITHUB_WORKSPACE}/packaging/systemd/sentinel.service %{buildroot}/usr/lib/systemd/system/sentinel.service
           install -Dm644 ${GITHUB_WORKSPACE}/README.md %{buildroot}%{_docdir}/sentinel/README.md
           install -Dm644 ${GITHUB_WORKSPACE}/LICENSE.md %{buildroot}%{_datadir}/licenses/sentinel/LICENSE
 
           %files
           %{_bindir}/sentinel
-          %{_unitdir}/sentinel.service
+          /usr/lib/systemd/system/sentinel.service
           %doc %{_docdir}/sentinel/README.md
           %{_datadir}/licenses/sentinel/LICENSE
           EOF
