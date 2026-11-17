@@ -38,7 +38,7 @@ jobs:
         run: cargo test
 
   release:
-    name: Build the release tarball
+    name: Build release packages
     needs: check
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -53,10 +53,83 @@ jobs:
       - name: Cache the build
         uses: Swatinem/rust-cache@v2
 
+      - name: Set version
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 \
+            | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1)
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build the release binary
+        run: cargo build --release
+
       - name: Build the tarball
         run: make package
 
-      - name: Attach it to the release
+      - name: Build Debian package (.deb)
+        run: |
+          DEB_DIR="build/deb/sentinel_${VERSION}_amd64"
+          mkdir -p "${DEB_DIR}/DEBIAN"
+          mkdir -p "${DEB_DIR}/usr/bin"
+          mkdir -p "${DEB_DIR}/lib/systemd/system"
+          mkdir -p "${DEB_DIR}/usr/share/doc/sentinel"
+
+          install -Dm755 target/release/sentinel             "${DEB_DIR}/usr/bin/sentinel"
+          install -Dm644 packaging/systemd/sentinel.service  "${DEB_DIR}/lib/systemd/system/sentinel.service"
+          install -Dm644 README.md                           "${DEB_DIR}/usr/share/doc/sentinel/README.md"
+          install -Dm644 LICENSE.md                          "${DEB_DIR}/usr/share/doc/sentinel/copyright"
+
+          sed 's/^[ \t]*//' <<EOF > "${DEB_DIR}/DEBIAN/control"
+          Package: sentinel
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Namte Rhak <nantherak@gmail.com>
+          Description: A lightweight Linux system monitor with anomaly detection and safe resource control
+          EOF
+
+          dpkg-deb --build "${DEB_DIR}" "build/sentinel_${VERSION}_amd64.deb"
+
+      - name: Build RPM package (.rpm)
+        run: |
+          RPM_ROOT="${HOME}/rpmbuild"
+          mkdir -p "${RPM_ROOT}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          sed 's/^[ \t]*//' <<EOF > "${RPM_ROOT}/SPECS/sentinel.spec"
+          Name:           sentinel
+          Version:        ${VERSION}
+          Release:        1
+          Summary:        A lightweight Linux system monitor with anomaly detection and safe resource control
+          License:        MIT
+          URL:            https://github.com/NanteRhak/sential-rs
+          BuildArch:      x86_64
+
+          %description
+          A lightweight Linux system monitor with anomaly detection and safe resource control.
+
+          %prep
+          %build
+
+          %install
+          install -Dm755 ${GITHUB_WORKSPACE}/target/release/sentinel %{buildroot}%{_bindir}/sentinel
+          install -Dm644 ${GITHUB_WORKSPACE}/packaging/systemd/sentinel.service %{buildroot}%{_unitdir}/sentinel.service
+          install -Dm644 ${GITHUB_WORKSPACE}/README.md %{buildroot}%{_docdir}/sentinel/README.md
+          install -Dm644 ${GITHUB_WORKSPACE}/LICENSE.md %{buildroot}%{_datadir}/licenses/sentinel/LICENSE
+
+          %files
+          %{_bindir}/sentinel
+          %{_unitdir}/sentinel.service
+          %doc %{_docdir}/sentinel/README.md
+          %{_datadir}/licenses/sentinel/LICENSE
+          EOF
+
+          rpmbuild -bb "${RPM_ROOT}/SPECS/sentinel.spec"
+          cp "${RPM_ROOT}"/RPMS/x86_64/*.rpm build/
+
+      - name: Attach artifacts to the release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/sentinel-*.tar.gz
+          files: |
+            build/sentinel-*.tar.gz
+            build/sentinel_*.deb
+            build/*.rpm
