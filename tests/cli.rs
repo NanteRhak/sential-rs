@@ -442,12 +442,16 @@ fn protected_processes_are_marked_in_the_process_list() {
         "[critical_processes]\nnames = [\"sleep\"]\n",
     )
     .unwrap();
+    // The marker needs a process to match, so run one rather than hoping another test's child lives.
+    let mut child = sleeping_child();
 
     let out = Command::new(env!("CARGO_BIN_EXE_sentinel"))
         .arg("ps")
         .current_dir(&dir)
         .output()
         .expect("failed to run sentinel");
+    let _ = child.kill();
+    let _ = child.wait();
     std::fs::remove_dir_all(&dir).unwrap();
 
     assert!(out.status.success(), "exit status: {:?}", out.status);
