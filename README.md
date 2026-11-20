@@ -304,6 +304,14 @@ $ sentinel daemon --duration 1h --log-file sentinel.log
 This is the mode used by the systemd service described in
 [Running it as a service](#running-it-as-a-service).
 
+### Update it
+
+`sentinel update --check` asks GitHub for the latest release and says whether
+it is newer than the binary you are running. `sentinel update` downloads that
+release's tarball, checks that the new binary runs, and renames it over the
+current one — so it asks first, and needs write access to wherever sentinel is
+installed. It uses `curl` and `tar`, and does nothing unless you run it.
+
 ### Quick reference
 
 | Command | What it does |
@@ -322,6 +330,7 @@ This is the mode used by the systemd service described in
 | `sentinel limit <pid> [--cpu 50] [--memory 20] [--remove] [--dry-run]` | Cap what a process may use, with a cgroup |
 | `sentinel report [--last 10m] [--json]` | What happened in the recent past |
 | `sentinel daemon [--duration] [--background] [--log-file]` | Run in the background |
+| `sentinel update [--check] [--yes]` | Install the latest release over this binary |
 
 Every action that touches a process asks first, unless `--yes` is given, and
 `--dry-run` reports what would happen without doing it. Every action is

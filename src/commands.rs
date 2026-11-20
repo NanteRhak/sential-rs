@@ -51,6 +51,7 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
             background,
             log_file,
         } => daemon(config, duration, background, log_file),
+        Command::Update { check, yes } => update(config, check, yes),
     }
 }
 
@@ -550,6 +551,141 @@ fn detach() -> Result<(), String> {
     Ok(())
 }
 
+/// The latest GitHub release and the files attached to it.
+#[derive(serde::Deserialize)]
+struct Release {
+    tag_name: String,
+    assets: Vec<Asset>,
+}
+
+#[derive(serde::Deserialize)]
+struct Asset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// Replace this binary with the latest release.
+fn update(config: Config, check: bool, yes: bool) -> Result<(), String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let release = latest_release()?;
+    let latest = release.tag_name.trim_start_matches('v');
+    if !is_newer(current, latest) {
+        println!("sentinel {current} is up to date");
+        return Ok(());
+    }
+    if check {
+        println!("sentinel {current} -> {latest} is available");
+        println!("run `sentinel update` to install it");
+        return Ok(());
+    }
+    let Some(asset) = release
+        .assets
+        .iter()
+        .find(|asset| asset.name.ends_with(".tar.gz"))
+    else {
+        return Err(format!("release v{latest} has no tarball to install"));
+    };
+    if config.actions.confirm
+        && !yes
+        && !confirm(&format!("update sentinel {current} -> {latest}? [y/N] "))
+    {
+        return Err("cancelled".into());
+    }
+
+    let exe = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(|error| format!("cannot find the running binary: {error}"))?;
+    let tmp = std::env::temp_dir().join(format!("sentinel-update-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp)
+        .map_err(|error| format!("cannot use {}: {error}", tmp.display()))?;
+    let outcome = install_release(&asset.browser_download_url, latest, &exe, &tmp);
+    let _ = std::fs::remove_dir_all(&tmp);
+    outcome?;
+    println!("updated sentinel {current} -> {latest} ({})", exe.display());
+    Ok(())
+}
+
+fn latest_release() -> Result<Release, String> {
+    let repo = env!("CARGO_PKG_REPOSITORY").trim_start_matches("https://github.com/");
+    let url = format!("https://api.github.com/repos/{repo}/releases/latest");
+    let output = std::process::Command::new("curl")
+        .args(["-fsSL", &url])
+        .output()
+        .map_err(|error| format!("sentinel update needs curl: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cannot reach GitHub: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("unexpected answer from GitHub: {error}"))
+}
+
+/// Download the release, check that it runs, then swap it in.
+fn install_release(
+    url: &str,
+    version: &str,
+    exe: &std::path::Path,
+    tmp: &std::path::Path,
+) -> Result<(), String> {
+    let archive = tmp.join("sentinel.tar.gz").to_string_lossy().into_owned();
+    let dir = tmp.to_string_lossy().into_owned();
+    run_tool("curl", &["-fsSL", "-o", &archive, url])?;
+    run_tool("tar", &["-xzf", &archive, "-C", &dir])?;
+
+    let new = std::fs::read_dir(tmp)
+        .map_err(|error| format!("cannot read {}: {error}", tmp.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("sentinel"))
+        .find(|path| path.is_file())
+        .ok_or("the release archive has no sentinel binary")?;
+
+    let check = std::process::Command::new(&new)
+        .arg("--version")
+        .output()
+        .map_err(|error| format!("the downloaded binary cannot run: {error}"))?;
+    if !check.status.success() || !String::from_utf8_lossy(&check.stdout).contains(version) {
+        return Err("the downloaded binary does not report the expected version".into());
+    }
+
+    // Stage next to the target so the swap is a rename on the same filesystem.
+    let staged = exe.with_extension("update");
+    std::fs::copy(&new, &staged)
+        .map_err(|error| format!("cannot write {}: {error} (try sudo)", staged.display()))?;
+    std::fs::rename(&staged, exe).map_err(|error| {
+        let _ = std::fs::remove_file(&staged);
+        format!("cannot replace {}: {error} (try sudo)", exe.display())
+    })?;
+    Ok(())
+}
+
+fn run_tool(tool: &str, args: &[&str]) -> Result<(), String> {
+    let output = std::process::Command::new(tool)
+        .args(args)
+        .output()
+        .map_err(|error| format!("sentinel update needs {tool}: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "{tool} failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
+}
+
+/// Whether a tag such as `v0.3.0` is newer than `0.2.1`.
+fn is_newer(current: &str, latest: &str) -> bool {
+    fn parts(text: &str) -> Vec<u64> {
+        text.trim_start_matches('v')
+            .split('.')
+            .map(|part| part.parse().unwrap_or(0))
+            .collect()
+    }
+    parts(latest) > parts(current)
+}
+
 /// Summarise what happened over a window.
 fn report(config: Config, last: Option<String>, json: bool) -> Result<(), String> {
     let window = match last {
@@ -672,5 +808,13 @@ mod tests {
         let error = resolve_interval(Some("fast".into()), Duration::from_secs(1)).unwrap_err();
 
         assert!(error.contains("--interval"), "{error}");
+    }
+
+    #[test]
+    fn only_a_bigger_tag_counts_as_an_update() {
+        assert!(is_newer("0.2.1", "0.3.0"));
+        assert!(is_newer("0.2.1", "v0.2.2"));
+        assert!(!is_newer("0.2.1", "0.2.1"));
+        assert!(!is_newer("0.2.1", "v0.2.0"));
     }
 }

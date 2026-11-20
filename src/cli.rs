@@ -160,4 +160,13 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         log_file: Option<String>,
     },
+    /// Update sentinel from its GitHub releases
+    Update {
+        /// Only report whether a newer release exists
+        #[arg(long)]
+        check: bool,
+        /// Install without asking for confirmation
+        #[arg(long)]
+        yes: bool,
+    },
 }
