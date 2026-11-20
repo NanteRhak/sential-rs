@@ -1,0 +1,250 @@
+.TH SENTINEL 1 "November 2026" "sentinel" "User Commands"
+.SH NAME
+sentinel \- lightweight Linux system monitor with anomaly detection and safe resource control
+.SH SYNOPSIS
+.B sentinel
+[\fB\-\-help\fR] [\fB\-\-version\fR]
+.br
+.B sentinel
+\fBhealth\fR [\fB\-\-interval\fR \fIDURATION\fR] [\fB\-\-loopback\fR]
+.br
+.B sentinel
+\fBps\fR [\fB\-\-sort\fR \fIFIELD\fR] [\fB\-\-json\fR]
+.br
+.B sentinel
+\fBtop\fR [\fB\-\-json\fR]
+.br
+.B sentinel
+\fBtui\fR
+.br
+.B sentinel
+\fBwatch\fR [\fB\-\-interval\fR \fIDURATION\fR] [\fB\-\-duration\fR \fIDURATION\fR]
+.br
+.B sentinel
+\fBalerts\fR [\fB\-\-last\fR \fIDURATION\fR]
+.br
+.B sentinel
+\fBinspect\fR \fIPID\fR
+.br
+.B sentinel
+\fBkill\fR \fIPID\fR [\fB\-\-signal\fR \fISIGNAL\fR] [\fB\-\-yes\fR] [\fB\-\-dry\-run\fR]
+.br
+.B sentinel
+\fBsuspend\fR \fIPID\fR [\fB\-\-yes\fR] [\fB\-\-dry\-run\fR]
+.br
+.B sentinel
+\fBresume\fR \fIPID\fR [\fB\-\-yes\fR] [\fB\-\-dry\-run\fR]
+.br
+.B sentinel
+\fBlimit\fR \fIPID\fR [\fB\-\-cpu\fR \fIPERCENT\fR] [\fB\-\-memory\fR \fIPERCENT\fR] [\fB\-\-remove\fR] [\fB\-\-yes\fR] [\fB\-\-dry\-run\fR]
+.br
+.B sentinel
+\fBrenice\fR \fIPID\fR \fIVALUE\fR [\fB\-\-yes\fR] [\fB\-\-dry\-run\fR]
+.br
+.B sentinel
+\fBreport\fR [\fB\-\-last\fR \fIDURATION\fR] [\fB\-\-json\fR]
+.br
+.B sentinel
+\fBdaemon\fR [\fB\-\-duration\fR \fIDURATION\fR] [\fB\-\-background\fR] [\fB\-\-log\-file\fR \fIPATH\fR]
+.br
+.B sentinel
+\fBupdate\fR [\fB\-\-check\fR] [\fB\-\-yes\fR]
+.br
+.B sentinel
+\fBman\fR [\fB\-\-raw\fR]
+
+.SH DESCRIPTION
+.B sentinel
+is a lightweight Linux system monitoring and resource governance tool.
+It inspects system and process state entirely through direct reads of Linux pseudo-filesystems:
+.BR /proc ,
+.BR sysfs ,
+cgroups v2, and kernel pressure stall information (PSI) files.
+It requires no running background daemon for interactive queries, and does not depend on external metric agents.
+
+When configured as a daemon or run in watch mode,
+.B sentinel
+continually monitors system health, tracks resource exhaustion or anomaly thresholds, and records alerts or performs configured policy actions (such as OOM mitigation or priority adjustments).
+
+.SH SUBCOMMANDS
+
+.TP
+.BR health " [" \-\-interval " \fIDURATION\fR] [" \-\-loopback "]"
+Display a one-screen summary of current system health including CPU usage, memory and swap utilization, load average, disk I/O, network throughput, and hardware sensors.
+.RS
+.TP
+.BI \-\-interval " DURATION"
+Sampling interval used to compute differential rates (for example, \fB500ms\fR, \fB2s\fR).
+.TP
+.B \-\-loopback
+Include loopback interface traffic in network totals.
+.RE
+
+.TP
+.BR ps " [" \-\-sort " \fIFIELD\fR] [" \-\-json "]"
+List processes running on the system with their PID, user, resource consumption, and status.
+.RS
+.TP
+.BI \-\-sort " FIELD"
+Sort order for the process list. Acceptable values are: \fBcpu\fR, \fBmem\fR, \fBname\fR, \fBpressure\fR. Default is \fBcpu\fR.
+.TP
+.B \-\-json
+Format output as structured JSON.
+.RE
+
+.TP
+.BR top " [" \-\-json "]"
+Display the top resource-consuming processes and immediately exit.
+.RS
+.TP
+.B \-\-json
+Format output as structured JSON.
+.RE
+
+.TP
+.B tui
+Launch the interactive terminal dashboard for real-time monitoring and process control.
+
+.TP
+.BR watch " [" \-\-interval " \fIDURATION\fR] [" \-\-duration " \fIDURATION\fR]"
+Sample the system at high frequency to observe short-lived spikes or anomalies.
+.RS
+.TP
+.BI \-\-interval " DURATION"
+Interval between samples (e.g. \fB100ms\fR).
+.TP
+.BI \-\-duration " DURATION"
+Total time to watch before exiting.
+.RE
+
+.TP
+.BR alerts " [" \-\-last " \fIDURATION\fR]"
+Display recorded alert events from recent history.
+.RS
+.TP
+.BI \-\-last " DURATION"
+Show only alerts within the specified trailing window (e.g. \fB30m\fR, \fB1h\fR).
+.RE
+
+.TP
+.BI inspect " PID"
+Display detailed information about a single process, including threads, memory maps, file descriptors, cgroup membership, and PSI metrics.
+
+.TP
+.BI kill " PID" " [" \-\-signal " \fISIGNAL\fR] [" \-\-yes "] [" \-\-dry\-run "]"
+Send a termination signal to a target process.
+.RS
+.TP
+.BI \-\-signal " SIGNAL"
+Signal name or number to send (e.g., \fBSIGTERM\fR, \fBSIGKILL\fR, \fB15\fR, \fB9\fR). Default is \fBSIGTERM\fR.
+.TP
+.B \-\-yes
+Skip interactive confirmation prompt.
+.TP
+.B \-\-dry\-run
+Simulate the signal delivery without modifying the target process.
+.RE
+
+.TP
+.BI suspend " PID" " [" \-\-yes "] [" \-\-dry\-run "]"
+Suspend execution of a process using \fBSIGSTOP\fR.
+
+.TP
+.BI resume " PID" " [" \-\-yes "] [" \-\-dry\-run "]"
+Resume execution of a suspended process using \fBSIGCONT\fR.
+
+.TP
+.BI limit " PID" " [" \-\-cpu " \fIPERCENT\fR] [" \-\-memory " \fIPERCENT\fR] [" \-\-remove "] [" \-\-yes "] [" \-\-dry\-run "]"
+Apply or remove resource usage limits on a process using Linux cgroups v2.
+.RS
+.TP
+.BI \-\-cpu " PERCENT"
+Maximum CPU allocation percentage.
+.TP
+.BI \-\-memory " PERCENT"
+Maximum memory quota as a percentage of system RAM.
+.TP
+.B \-\-remove
+Remove existing cgroup resource restrictions for the process.
+.RE
+
+.TP
+.BI renice " PID VALUE" " [" \-\-yes "] [" \-\-dry\-run "]"
+Change the scheduling priority (nice value) of a process. Lower numbers indicate higher scheduling priority.
+
+.TP
+.BR report " [" \-\-last " \fIDURATION\fR] [" \-\-json "]"
+Summarise system events, anomalies, and resource metrics over the designated historical window.
+
+.TP
+.BR daemon " [" \-\-duration " \fIDURATION\fR] [" \-\-background "] [" \-\-log\-file " \fIPATH\fR]"
+Run
+.B sentinel
+as a background monitoring service.
+.RS
+.TP
+.BI \-\-duration " DURATION"
+Total time to run before terminating.
+.TP
+.B \-\-background
+Daemonize into the background.
+.TP
+.BI \-\-log\-file " PATH"
+File path to write daemon logs.
+.RE
+
+.TP
+.BR update " [" \-\-check "] [" \-\-yes "]"
+Check for or apply new releases from the repository.
+
+.TP
+.BR man " [" \-\-raw "]"
+Show this manual page.
+.RS
+.TP
+.B \-\-raw
+Output the raw troff/roff source without opening a pager or invoking a formatter.
+.RE
+
+.SH CONFIGURATION
+.B sentinel
+looks for its configuration file in the following order:
+.IP 1.
+The path specified in the \fBSENTINEL_CONFIG\fR environment variable.
+.IP 2.
+\fB/etc/sentinel/config.toml\fR
+.IP 3.
+\fB~/.config/sentinel/config.toml\fR
+
+If no configuration file exists, sensible defaults are used.
+
+.SH FILES
+.TP
+.I /etc/sentinel/config.toml
+System-wide configuration file.
+.TP
+.I ~/.config/sentinel/config.toml
+User-level configuration file.
+.TP
+.I /var/lib/sentinel/sentinel.log
+Default log file location when running as a systemd service.
+.TP
+.I /proc
+Kernel process and system metric pseudo-filesystem.
+.TP
+.I /sys
+Kernel device and subsystem pseudo-filesystem.
+
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An error occurred, an invalid argument was specified, or an operation was cancelled.
+
+.SH SEE ALSO
+.BR top (1),
+.BR htop (1),
+.BR proc (5),
+.BR cgroups (7)

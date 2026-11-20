@@ -30,11 +30,13 @@ fmt:
 install: release
 	install -Dm755 target/$(RELEASE)/sentinel $(DEST)/bin/sentinel
 	install -Dm644 packaging/systemd/sentinel.service $(DEST)/lib/systemd/system/sentinel.service
+	install -Dm644 packaging/man/sentinel.1 $(DEST)/share/man/man1/sentinel.1
 	install -Dm644 README.md $(DEST)/share/doc/sentinel/README.md
 
 uninstall:
 	rm -f $(DEST)/bin/sentinel
 	rm -f $(DEST)/lib/systemd/system/sentinel.service
+	rm -f $(DEST)/share/man/man1/sentinel.1
 	rm -rf $(DEST)/share/doc/sentinel
 
 # A release tarball with the binary, the service unit and the documentation.
@@ -42,6 +44,7 @@ package: release
 	@mkdir -p $(BUILD)/sentinel-$(VERSION)
 	install -Dm755 target/$(RELEASE)/sentinel $(BUILD)/sentinel-$(VERSION)/sentinel
 	install -Dm644 packaging/systemd/sentinel.service $(BUILD)/sentinel-$(VERSION)/sentinel.service
+	install -Dm644 packaging/man/sentinel.1 $(BUILD)/sentinel-$(VERSION)/sentinel.1
 	install -Dm644 README.md $(BUILD)/sentinel-$(VERSION)/README.md
 	install -Dm644 LICENSE.md $(BUILD)/sentinel-$(VERSION)/LICENSE
 	tar -C $(BUILD) -czf $(BUILD)/sentinel-$(VERSION).tar.gz sentinel-$(VERSION)

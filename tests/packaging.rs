@@ -111,3 +111,33 @@ fn the_binary_builds_in_release_mode() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn the_man_page_is_valid() {
+    let man_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("packaging/man")
+        .join("sentinel.1");
+    let content = std::fs::read_to_string(&man_path).expect("man page is missing");
+
+    assert!(content.contains(".TH SENTINEL 1"), "missing .TH header");
+    assert!(content.contains(".SH NAME"), "missing NAME section");
+    assert!(content.contains(".SH SYNOPSIS"), "missing SYNOPSIS section");
+    assert!(
+        content.contains(".SH DESCRIPTION"),
+        "missing DESCRIPTION section"
+    );
+    assert!(
+        content.contains(".SH SUBCOMMANDS"),
+        "missing SUBCOMMANDS section"
+    );
+    assert!(
+        content.contains(".SH CONFIGURATION"),
+        "missing CONFIGURATION section"
+    );
+    assert!(content.contains(".SH FILES"), "missing FILES section");
+    assert!(
+        content.contains(".SH EXIT STATUS"),
+        "missing EXIT STATUS section"
+    );
+    assert!(content.contains(".SH SEE ALSO"), "missing SEE ALSO section");
+}

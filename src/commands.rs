@@ -52,6 +52,7 @@ pub fn run(command: Command, config: Config) -> Result<(), String> {
             log_file,
         } => daemon(config, duration, background, log_file),
         Command::Update { check, yes } => update(config, check, yes),
+        Command::Man { raw } => man(raw),
     }
 }
 
@@ -604,6 +605,89 @@ fn update(config: Config, check: bool, yes: bool) -> Result<(), String> {
     outcome?;
     println!("updated sentinel {current} -> {latest} ({})", exe.display());
     Ok(())
+}
+
+const MAN_PAGE: &str = include_str!("../packaging/man/sentinel.1");
+
+fn man(raw: bool) -> Result<(), String> {
+    if raw {
+        print!("{MAN_PAGE}");
+        return Ok(());
+    }
+
+    let is_tty = unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 };
+    if is_tty && try_man_pager() {
+        return Ok(());
+    }
+
+    if try_groff_pager(is_tty) {
+        return Ok(());
+    }
+
+    print!("{MAN_PAGE}");
+    Ok(())
+}
+
+fn try_man_pager() -> bool {
+    let Ok(mut child) = std::process::Command::new("man")
+        .arg("-l")
+        .arg("-")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    else {
+        return false;
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        let _ = stdin.write_all(MAN_PAGE.as_bytes());
+    }
+
+    child.wait().map(|s| s.success()).unwrap_or(false)
+}
+
+fn try_groff_pager(is_tty: bool) -> bool {
+    let Ok(mut child) = std::process::Command::new("groff")
+        .args(["-man", "-Tutf8"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+    else {
+        return false;
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        let _ = stdin.write_all(MAN_PAGE.as_bytes());
+    }
+
+    let Ok(output) = child.wait_with_output() else {
+        return false;
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let formatted = String::from_utf8_lossy(&output.stdout);
+    if is_tty {
+        let pager = std::env::var("PAGER").unwrap_or_else(|_| "less".into());
+        if let Ok(mut pager_child) = std::process::Command::new(pager)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            if let Some(mut stdin) = pager_child.stdin.take() {
+                use std::io::Write;
+                let _ = stdin.write_all(formatted.as_bytes());
+            }
+            if pager_child.wait().map(|s| s.success()).unwrap_or(false) {
+                return true;
+            }
+        }
+    }
+
+    print!("{formatted}");
+    true
 }
 
 fn latest_release() -> Result<Release, String> {
