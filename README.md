@@ -347,10 +347,12 @@ borders and colour-coded meters (green, yellow, red).
 | --- | --- |
 | `q` | Quit |
 | `t` `m` `i` `N` | Sort by CPU, memory, disk I/O, network |
-| `f` | Narrow the table to one resource |
-| `/` | Search by process name |
+| `f` | Narrow the table to CPU or memory |
+| `/` | Search by process name; the table filters as you type |
+| `Esc` | Leave the search box and go back to the process table |
+| `[` `]` | Scroll the network interface list |
 | `↑` `↓` | Move the selection; the table scrolls to follow it |
-| `Enter` | Open the detail panel |
+| `Enter` | Keep the search, or open the detail panel when not searching |
 | `a` | Open the action menu |
 | `k` `s` `r` `n` | Kill, suspend, resume, renice the selected process |
 

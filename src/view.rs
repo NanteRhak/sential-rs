@@ -179,30 +179,30 @@ fn network_section(sample: &SystemSample) -> String {
 /// The disk row: throughput, the per-disk breakdown and filesystem usage.
 fn disk_section(sample: &SystemSample) -> String {
     let disk = &sample.disk;
-    let mut out = String::new();
-    out.push_str("Disk\n");
-    out.push_str(&row(
-        "Throughput",
-        &format!(
-            "read {}  write {}",
-            rate(disk.read_bytes_per_sec),
-            rate(disk.write_bytes_per_sec)
+    let mut rows: Vec<(String, String)> = vec![
+        (
+            "Throughput".to_string(),
+            format!(
+                "read {}  write {}",
+                rate(disk.read_bytes_per_sec),
+                rate(disk.write_bytes_per_sec)
+            ),
         ),
-    ));
-    out.push_str(&row(
-        "Operations",
-        &format!(
-            "read {}/s  write {}/s",
-            disk.read_ops_per_sec, disk.write_ops_per_sec
+        (
+            "Operations".to_string(),
+            format!(
+                "read {}/s  write {}/s",
+                disk.read_ops_per_sec, disk.write_ops_per_sec
+            ),
         ),
-    ));
+    ];
     if disk.devices.is_empty() {
-        out.push_str(&row("Devices", "no devices reported"));
+        rows.push(("Devices".to_string(), "no devices reported".to_string()));
     } else {
         for device in &disk.devices {
-            out.push_str(&row(
-                &format!("Device {}", device.device),
-                &format!(
+            rows.push((
+                format!("Device {}", device.device),
+                format!(
                     "read {}  write {}  {} ops read/s  {} ops write/s",
                     rate(device.read_bytes_per_sec),
                     rate(device.write_bytes_per_sec),
@@ -213,13 +213,16 @@ fn disk_section(sample: &SystemSample) -> String {
         }
     }
     if disk.filesystems.is_empty() {
-        out.push_str(&row("Filesystems", "no filesystems reported"));
+        rows.push((
+            "Filesystems".to_string(),
+            "no filesystems reported".to_string(),
+        ));
     } else {
         for filesystem in &disk.filesystems {
             let used_percent = percent(filesystem.used_bytes, filesystem.total_bytes);
-            out.push_str(&row(
-                &format!("Filesystem {}", filesystem.mount_point),
-                &format!(
+            rows.push((
+                format!("Filesystem {}", filesystem.mount_point),
+                format!(
                     "{} used of {} ({used_percent:.1}%)",
                     bytes_to_human(filesystem.used_bytes),
                     bytes_to_human(filesystem.total_bytes)
@@ -228,7 +231,20 @@ fn disk_section(sample: &SystemSample) -> String {
         }
     }
     for note in &disk.notes {
-        out.push_str(&row("Skipped", note));
+        rows.push(("Skipped".to_string(), note.clone()));
+    }
+    // Line the values up under the longest label in the section. That is
+    // usually the deepest mount point, which can be much longer than the
+    // fixed label width used by the other sections.
+    let width = rows
+        .iter()
+        .map(|(label, _)| label.chars().count() + 2)
+        .max()
+        .unwrap_or(LABEL)
+        .max(LABEL);
+    let mut out = String::from("Disk\n");
+    for (label, value) in rows {
+        out.push_str(&row_at(&label, &value, width));
     }
     out
 }
@@ -598,7 +614,16 @@ fn rate(bytes_per_sec: u64) -> String {
 
 /// One `label   value` line, with the label padded to a fixed width.
 fn row(label: &str, value: &str) -> String {
-    format!("  {label:<LABEL$}{value}\n", LABEL = LABEL)
+    row_at(label, value, LABEL)
+}
+
+/// One `label   value` line, with the label padded to at least `width`.
+///
+/// A label longer than the column still gets a space, so a long mount path
+/// cannot run into the value after it.
+fn row_at(label: &str, value: &str, width: usize) -> String {
+    let width = width.max(label.chars().count() + 1);
+    format!("  {label:<width$}{value}\n")
 }
 
 fn join_percent(values: &[f64]) -> String {
@@ -694,6 +719,41 @@ mod tests {
         assert!(text.contains("Filesystem /"), "{text}");
         assert!(text.contains("50.0%"), "{text}");
         assert!(text.contains("/mnt/x: cannot read"), "{text}");
+    }
+
+    #[test]
+    fn filesystem_values_line_up_under_the_longest_mount_point() {
+        let sample = SystemSample {
+            disk: crate::core::metrics::DiskSample {
+                filesystems: vec![
+                    crate::core::metrics::FilesystemSample {
+                        mount_point: "/".into(),
+                        used_bytes: 50,
+                        total_bytes: 100,
+                        available_bytes: 50,
+                    },
+                    crate::core::metrics::FilesystemSample {
+                        mount_point: "/run/media/user/very-long-name".into(),
+                        used_bytes: 1,
+                        total_bytes: 2,
+                        available_bytes: 1,
+                    },
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let text = health(&sample, false, false);
+        let columns: Vec<usize> = text
+            .lines()
+            .filter(|line| line.trim_start().starts_with("Filesystem "))
+            .map(|line| line.find(|c: char| c.is_ascii_digit()).unwrap())
+            .collect();
+
+        assert_eq!(columns.len(), 2, "{text}");
+        assert_eq!(columns[0], columns[1], "{text}");
+        assert!(!text.contains("very-long-name1 B"), "{text}");
     }
 
     #[test]

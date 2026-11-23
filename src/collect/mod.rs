@@ -298,6 +298,9 @@ pub fn sample_between(current: &RawSnapshot, previous: Option<&RawSnapshot>) -> 
         network.drops_total += interface.drops_total;
         network.interfaces.push(interface);
     }
+    // The counters arrive in a hash map, whose order changes every tick; the
+    // display must not.
+    network.interfaces.sort_by(|a, b| a.name.cmp(&b.name));
     sample.network = network;
 
     sample
@@ -397,6 +400,29 @@ mod tests {
 
         assert_eq!(sample.disk.read_bytes_per_sec, 1_000);
         assert_eq!(sample.disk.devices[0].device, "sda");
+    }
+
+    #[test]
+    fn interfaces_are_listed_in_a_stable_order() {
+        let first = RawSnapshot {
+            network: HashMap::from([
+                ("wlan0".to_string(), NetworkCounters::default()),
+                ("eth0".to_string(), NetworkCounters::default()),
+            ]),
+            ..Default::default()
+        };
+        let mut second = first.clone();
+        second.at = first.at + Duration::from_secs(1);
+
+        let sample = sample_between(&second, Some(&first));
+        let names: Vec<_> = sample
+            .network
+            .interfaces
+            .iter()
+            .map(|interface| interface.name.as_str())
+            .collect();
+
+        assert_eq!(names, ["eth0", "wlan0"]);
     }
 
     #[test]
