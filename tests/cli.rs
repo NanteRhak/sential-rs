@@ -15,13 +15,58 @@ fn help_lists_the_planned_subcommands() {
 
     for cmd in [
         "health", "ps", "top", "tui", "watch", "alerts", "inspect", "kill", "suspend", "resume",
-        "renice", "report", "daemon",
+        "renice", "report", "daemon", "man",
     ] {
         assert!(
             stdout
                 .lines()
                 .any(|line| line.trim_start().starts_with(cmd)),
             "help output is missing `{cmd}`:\n{stdout}"
+        );
+    }
+}
+
+#[test]
+fn each_subcommand_has_detailed_long_help() {
+    // A phrase that only appears in the long help, not in the one-line summary.
+    let cases: &[(&str, &str)] = &[
+        ("health", "two readings"),
+        ("ps", "stable field names"),
+        ("top", "one-shot snapshot"),
+        ("tui", "full-screen dashboard"),
+        ("watch", "policy proposals"),
+        ("alerts", "rather than guessing"),
+        ("inspect", "file-descriptor counts"),
+        ("kill", "recycled PID"),
+        ("suspend", "SIGSTOP"),
+        ("resume", "SIGCONT"),
+        ("limit", "cgroup v2"),
+        ("renice", "start-time checks"),
+        ("report", "persist_history"),
+        ("daemon", "setsid"),
+        ("update", "same filesystem"),
+        ("man", "formatter is installed"),
+    ];
+
+    for (cmd, phrase) in cases {
+        let long = sentinel(&[cmd, "--help"]);
+        assert!(long.status.success(), "{cmd} --help failed");
+        let long = String::from_utf8_lossy(&long.stdout);
+        assert!(
+            long.contains(phrase),
+            "{cmd} --help is missing long text `{phrase}`:\n{long}"
+        );
+        assert!(
+            long.contains("Example"),
+            "{cmd} --help is missing an examples block:\n{long}"
+        );
+
+        let short = sentinel(&[cmd, "-h"]);
+        assert!(short.status.success(), "{cmd} -h failed");
+        let short = String::from_utf8_lossy(&short.stdout);
+        assert!(
+            !short.contains(phrase),
+            "{cmd} -h should stay short but contains `{phrase}`:\n{short}"
         );
     }
 }
@@ -612,4 +657,29 @@ fn broken_local_config_fails_before_running_the_command() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("general.interval"), "stderr: {stderr}");
     assert!(stderr.contains("sentinel.toml"), "stderr: {stderr}");
+}
+
+#[test]
+fn man_subcommand_outputs_raw_content() {
+    let out = sentinel(&["man", "--raw"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(stdout.contains(".TH SENTINEL 1"), "output: {stdout}");
+    assert!(stdout.contains("health"), "output: {stdout}");
+    assert!(stdout.contains("watch"), "output: {stdout}");
+}
+
+#[test]
+fn man_subcommand_runs_successfully() {
+    let out = sentinel(&["man"]);
+    assert!(out.status.success(), "exit status: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    // Stdout should have non-empty content describing sentinel
+    assert!(!stdout.is_empty(), "man output was empty");
+    assert!(
+        stdout.contains("sentinel") || stdout.contains("SENTINEL"),
+        "output: {stdout}"
+    );
 }

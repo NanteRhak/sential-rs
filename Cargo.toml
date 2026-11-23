@@ -1,6 +1,6 @@
 [package]
 name = "sentinel"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"
 description = "A lightweight Linux system monitor with anomaly detection and safe resource control"

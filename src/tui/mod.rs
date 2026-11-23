@@ -111,6 +111,8 @@ pub fn on_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('N') => app.sort = Sort::Net,
         KeyCode::Char('f') => app.cycle_filter(),
         KeyCode::Char('/') => app.start_search(),
+        KeyCode::Char('[') => app.scroll_network(-1),
+        KeyCode::Char(']') => app.scroll_network(1),
         KeyCode::Up => app.selected = app.selected.saturating_sub(1),
         KeyCode::Down => {
             let last = app.rows().len().saturating_sub(1);
@@ -246,7 +248,7 @@ mod tests {
             app.status_line()
         );
 
-        for _ in 0..4 {
+        for _ in 0..2 {
             press(&mut app, 'f');
         }
         assert_eq!(app.filter, None);
@@ -258,14 +260,36 @@ mod tests {
         let mut app = app();
 
         press(&mut app, '/');
-        assert!(app.status_line().contains('/'), "{}", app.status_line());
+        assert!(app.typing.is_some());
         press(&mut app, 'b');
+        assert_eq!(app.rows().len(), 1, "the search filters as it is typed");
         press(&mut app, 'a');
         enter(&mut app);
 
         assert_eq!(app.search.as_deref(), Some("ba"));
         assert_eq!(app.rows().len(), 1);
         assert_eq!(app.rows()[0].pid, 2);
+    }
+
+    #[test]
+    fn esc_leaves_the_search_box_and_keeps_the_previous_search() {
+        let mut app = app();
+
+        press(&mut app, '/');
+        press(&mut app, 'b');
+        press(&mut app, 'a');
+        enter(&mut app);
+        assert_eq!(app.rows().len(), 1);
+
+        press(&mut app, '/');
+        press(&mut app, 'z');
+        assert_eq!(app.rows().len(), 0, "the typed search filters live");
+
+        on_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.typing.is_none());
+        assert_eq!(app.search.as_deref(), Some("ba"));
+        assert_eq!(app.rows().len(), 1);
     }
 
     #[test]

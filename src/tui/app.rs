@@ -33,8 +33,6 @@ pub enum Menu {
 pub enum Resource {
     Cpu,
     Memory,
-    Io,
-    Network,
 }
 
 impl Resource {
@@ -42,8 +40,6 @@ impl Resource {
         match self {
             Resource::Cpu => "cpu",
             Resource::Memory => "memory",
-            Resource::Io => "i/o",
-            Resource::Network => "network",
         }
     }
 }
@@ -62,6 +58,8 @@ pub struct App {
     pub search: Option<String>,
     /// The search being typed, before it is applied.
     pub typing: Option<String>,
+    /// How many lines the network interface list is scrolled down.
+    pub network_scroll: u16,
     /// Whether the detail panel is open.
     pub detail: bool,
     /// The action menu, when it is open.
@@ -83,6 +81,7 @@ impl App {
             filter: None,
             search: None,
             typing: None,
+            network_scroll: 0,
             detail: false,
             menu: None,
             config: Config::default(),
@@ -278,9 +277,7 @@ impl App {
         self.filter = match self.filter {
             None => Some(Resource::Cpu),
             Some(Resource::Cpu) => Some(Resource::Memory),
-            Some(Resource::Memory) => Some(Resource::Io),
-            Some(Resource::Io) => Some(Resource::Network),
-            Some(Resource::Network) => None,
+            Some(Resource::Memory) => None,
         };
         self.clamp_selection();
     }
@@ -294,12 +291,14 @@ impl App {
         if let Some(typing) = self.typing.as_mut() {
             typing.push(character);
         }
+        self.clamp_selection();
     }
 
     pub fn backspace(&mut self) {
         if let Some(typing) = self.typing.as_mut() {
             typing.pop();
         }
+        self.clamp_selection();
     }
 
     /// Apply the search being typed. An empty search shows everything again.
@@ -319,16 +318,19 @@ impl App {
         self.typing = None;
     }
 
+    /// Scroll the network interface list.
+    pub fn scroll_network(&mut self, delta: i16) {
+        self.network_scroll = self.network_scroll.saturating_add_signed(delta);
+    }
+
     /// The line above the table saying what is being shown.
     pub fn status_line(&self) -> String {
         let mut parts = vec![format!("sort: {}", sort_label(self.sort))];
         if let Some(filter) = self.filter {
             parts.push(format!("filter: {}", filter.label()));
         }
-        match (&self.typing, &self.search) {
-            (Some(typing), _) => parts.push(format!("/{typing}_")),
-            (None, Some(search)) => parts.push(format!("/{search}")),
-            (None, None) => {}
+        if let Some(search) = &self.search {
+            parts.push(format!("/{search}"));
         }
         parts.join("  ")
     }
@@ -346,7 +348,7 @@ impl App {
         if let Some(filter) = self.filter {
             processes.retain(|process| uses(process, filter));
         }
-        if let Some(search) = &self.search {
+        if let Some(search) = self.typing.as_deref().or(self.search.as_deref()) {
             let needle = search.to_lowercase();
             processes.retain(|process| process.name.to_lowercase().contains(&needle));
         }
@@ -358,14 +360,17 @@ impl App {
         let area = frame.area();
         let sample = &self.snapshot().system;
         let top_height = cpu_height(sample).max(11);
-        let panes = Layout::vertical([
+        let mut constraints = vec![
             Constraint::Length(top_height),
             Constraint::Length(5),
             Constraint::Length(4),
             Constraint::Min(6),
-            Constraint::Length(1),
-        ])
-        .split(area);
+        ];
+        if self.typing.is_some() {
+            constraints.push(Constraint::Length(1));
+        }
+        constraints.push(Constraint::Length(1));
+        let panes = Layout::vertical(constraints).split(area);
         let top = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
             .split(panes[0]);
         let right = Layout::vertical([Constraint::Length(6), Constraint::Min(5)]).split(top[1]);
@@ -375,18 +380,35 @@ impl App {
         self.draw_disk(frame, panes[1]);
         self.draw_alerts(frame, panes[2]);
         self.draw_processes(frame, panes[3]);
-        self.draw_footer(frame, panes[4]);
+        let footer = panes[panes.len() - 1];
+        if let Some(typing) = &self.typing {
+            self.draw_search(frame, panes[panes.len() - 2], typing);
+        }
+        self.draw_footer(frame, footer);
     }
 
     /// The key hints, or the result of the last action.
     fn draw_footer(&self, frame: &mut Frame, area: Rect) {
         let text = if self.status.is_empty() {
-            " q quit   t/m/i/N sort   f filter   / search   ↑↓ select   enter detail   a actions"
+            " q quit   t/m/i/N sort   f filter   / search   [ ] network   ↑↓ select   enter detail   a actions"
                 .to_string()
         } else {
             format!(" {}", self.status)
         };
         frame.render_widget(Paragraph::new(text), area);
+    }
+
+    /// The search box, under the process table.
+    fn draw_search(&self, frame: &mut Frame, area: Rect, typing: &str) {
+        let line = Line::from(vec![
+            Span::styled(" search: ", Style::default().fg(Color::Cyan)),
+            Span::raw(format!("{typing}_")),
+            Span::styled(
+                "   enter keep   esc cancel",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
     }
 
     /// The recent alerts, with their severity.
@@ -491,10 +513,12 @@ impl App {
     /// The CPU meters: the totals, the load and one meter per core.
     fn draw_cpu(&self, frame: &mut Frame, area: Rect) {
         let sample = &self.snapshot().system;
-        let mut lines = vec![summary_line("CPU", &cpu_summary(sample))];
+        let width = label_width(["CPU", "Load"]);
+        let mut lines = vec![summary_line("CPU", &cpu_summary(sample), width)];
         lines.push(summary_line(
             "Load",
             &format!("{}   {}", load_summary(sample), temperature_summary(sample)),
+            width,
         ));
         let cores = &sample.cpu.per_core_percent;
         let per_line = cores_per_line(cores.len());
@@ -526,13 +550,14 @@ impl App {
     fn draw_memory(&self, frame: &mut Frame, area: Rect) {
         let sample = &self.snapshot().system;
         let memory = &sample.memory;
+        let width = label_width(["Memory", "Used", "Cached", "Swap"]);
         let percent = if memory.total_bytes == 0 {
             0.0
         } else {
             memory.used_bytes as f64 / memory.total_bytes as f64 * 100.0
         };
         let mut meter = vec![Span::styled(
-            format!("{:<10}", "Used"),
+            format!("{:<width$}", "Used"),
             Style::default().fg(Color::Cyan),
         )];
         meter.extend(meter_spans(percent, 12));
@@ -548,6 +573,7 @@ impl App {
                     bytes_to_human(memory.used_bytes),
                     bytes_to_human(memory.total_bytes)
                 ),
+                width,
             ),
             Line::from(meter),
             summary_line(
@@ -557,6 +583,7 @@ impl App {
                     bytes_to_human(memory.cached_bytes),
                     bytes_to_human(memory.buffers_bytes)
                 ),
+                width,
             ),
             summary_line(
                 "Swap",
@@ -565,6 +592,7 @@ impl App {
                     bytes_to_human(memory.swap_used_bytes),
                     bytes_to_human(memory.swap_total_bytes)
                 ),
+                width,
             ),
         ];
         frame.render_widget(Paragraph::new(lines).block(panel("Memory")), area);
@@ -572,7 +600,8 @@ impl App {
 
     fn draw_disk(&self, frame: &mut Frame, area: Rect) {
         let sample = &self.snapshot().system;
-        let mut lines = vec![summary_line("Disk", &disk_summary(sample))];
+        let width = label_width(["Disk", "Devices", "Mounts"]);
+        let mut lines = vec![summary_line("Disk", &disk_summary(sample), width)];
         if !sample.disk.devices.is_empty() {
             let devices = sample
                 .disk
@@ -588,7 +617,7 @@ impl App {
                 })
                 .collect::<Vec<_>>()
                 .join("  ");
-            lines.push(summary_line("Devices", &devices));
+            lines.push(summary_line("Devices", &devices, width));
         }
         if !sample.disk.filesystems.is_empty() {
             let filesystems = sample
@@ -598,14 +627,23 @@ impl App {
                 .map(filesystem_summary)
                 .collect::<Vec<_>>()
                 .join("  ");
-            lines.push(summary_line("Mounts", &filesystems));
+            lines.push(summary_line("Mounts", &filesystems, width));
         }
         frame.render_widget(Paragraph::new(lines).block(panel("Disk")), area);
     }
 
     fn draw_network(&self, frame: &mut Frame, area: Rect) {
         let sample = &self.snapshot().system;
-        let mut lines = vec![summary_line("Network", &network_summary(sample))];
+        let width = label_width(
+            std::iter::once("Network").chain(
+                sample
+                    .network
+                    .interfaces
+                    .iter()
+                    .map(|interface| interface.name.as_str()),
+            ),
+        );
+        let mut lines = vec![summary_line("Network", &network_summary(sample), width)];
         for interface in &sample.network.interfaces {
             lines.push(summary_line(
                 &interface.name,
@@ -614,9 +652,17 @@ impl App {
                     bytes_to_human(interface.rx_bytes_per_sec),
                     bytes_to_human(interface.tx_bytes_per_sec)
                 ),
+                width,
             ));
         }
-        frame.render_widget(Paragraph::new(lines).block(panel("Network")), area);
+        let height = area.height.saturating_sub(2) as usize;
+        let offset = (self.network_scroll as usize).min(lines.len().saturating_sub(height)) as u16;
+        frame.render_widget(
+            Paragraph::new(lines)
+                .scroll((offset, 0))
+                .block(panel("Network")),
+            area,
+        );
     }
 
     fn draw_processes(&self, frame: &mut Frame, area: Rect) {
@@ -792,8 +838,6 @@ fn uses(process: &ProcessSample, resource: Resource) -> bool {
     match resource {
         Resource::Cpu => process.cpu_percent > 0.0,
         Resource::Memory => process.mem_rss_bytes > 0,
-        Resource::Io => crate::view::io_bytes(process) > 0,
-        Resource::Network => crate::view::net_bytes(process) > 0,
     }
 }
 
@@ -809,9 +853,24 @@ pub fn sort_label(sort: Sort) -> &'static str {
     }
 }
 
-fn summary_line(label: &str, value: &str) -> Line<'static> {
+/// The narrowest the label column gets before a long name widens it.
+const SUMMARY_LABEL: usize = 10;
+
+/// The label column a pane needs: the usual width, or wider when a label
+/// such as a network interface name is longer.
+fn label_width<'a>(labels: impl IntoIterator<Item = &'a str>) -> usize {
+    labels
+        .into_iter()
+        .map(|label| label.chars().count() + 2)
+        .max()
+        .unwrap_or(SUMMARY_LABEL)
+        .max(SUMMARY_LABEL)
+}
+
+fn summary_line(label: &str, value: &str, width: usize) -> Line<'static> {
+    let width = width.max(label.chars().count() + 1);
     Line::from(vec![
-        Span::styled(format!("{label:<10}"), Style::default().fg(Color::Cyan)),
+        Span::styled(format!("{label:<width$}"), Style::default().fg(Color::Cyan)),
         Span::raw(value.to_string()),
     ])
 }
@@ -1075,6 +1134,95 @@ mod tests {
         assert_eq!(records[0].pid, 42);
         assert_eq!(records[0].process_name, "backup");
         assert!(records[0].result.contains("dry run"), "{:?}", records[0]);
+    }
+
+    #[test]
+    fn the_search_box_sits_below_the_process_table_and_filters_live() {
+        let processes = vec![
+            ProcessSample {
+                pid: 1,
+                name: "firefox".into(),
+                ..Default::default()
+            },
+            ProcessSample {
+                pid: 2,
+                name: "backup".into(),
+                ..Default::default()
+            },
+        ];
+        let mut app = App::with_processes(processes);
+        app.start_search();
+        app.type_char('b');
+        app.type_char('a');
+
+        let text = render(&app, 120, 40);
+
+        assert!(text.contains("search: ba"), "{text}");
+        assert!(text.contains("backup"), "{text}");
+        assert!(!text.contains("firefox"), "{text}");
+        assert!(
+            text.find("search: ba").unwrap() > text.find("Processes").unwrap(),
+            "the search box is not below the table:\n{text}"
+        );
+    }
+
+    #[test]
+    fn the_network_list_scrolls_when_it_does_not_fit() {
+        let interfaces = (0..6)
+            .map(|index| crate::core::metrics::InterfaceSample {
+                name: format!("eth{index}"),
+                ..Default::default()
+            })
+            .collect();
+        let sample = SystemSample {
+            network: crate::core::metrics::NetworkSample {
+                interfaces,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut app = App::with_system(sample);
+
+        let before = render(&app, 100, 30);
+        assert!(before.contains("eth0"), "{before}");
+        assert!(!before.contains("eth5"), "{before}");
+
+        app.scroll_network(10);
+        let after = render(&app, 100, 30);
+
+        assert!(after.contains("eth5"), "{after}");
+        assert!(!after.contains("eth0"), "{after}");
+    }
+
+    #[test]
+    fn network_rows_line_up_under_the_longest_interface_name() {
+        let sample = SystemSample {
+            network: crate::core::metrics::NetworkSample {
+                interfaces: vec![
+                    crate::core::metrics::InterfaceSample {
+                        name: "eth0".into(),
+                        ..Default::default()
+                    },
+                    crate::core::metrics::InterfaceSample {
+                        name: "a-very-long-interface".into(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let app = App::with_system(sample);
+
+        let text = render(&app, 120, 40);
+        let columns: Vec<usize> = text
+            .lines()
+            .filter(|line| line.contains("received"))
+            .map(|line| line.find("received").unwrap())
+            .collect();
+
+        assert_eq!(columns.len(), 3, "{text}");
+        assert!(columns.iter().all(|column| *column == columns[0]), "{text}");
     }
 
     #[test]
