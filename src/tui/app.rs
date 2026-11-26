@@ -17,6 +17,9 @@ use crate::policy::PolicyAction;
 use crate::sample::{SamplerState, Shared};
 use crate::view::Sort;
 
+/// How long an alert stays in the alerts pane after it was raised.
+const ALERT_TTL_MILLIS: u64 = 30_000;
+
 /// What the action menu is showing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Menu {
@@ -411,19 +414,25 @@ impl App {
         frame.render_widget(Paragraph::new(line), area);
     }
 
-    /// The recent alerts, with their severity.
+    /// The recent alerts, with their severity. Each alert shows for 30 seconds
+    /// from when it was raised, then goes away on its own.
     fn draw_alerts(&self, frame: &mut Frame, area: Rect) {
         let block = panel("Alerts");
         let state = self.snapshot();
         let exits = &state.exits;
-        let alerts = &state.alerts;
+        let now = crate::collect::now_millis();
+        let alerts: Vec<_> = state
+            .alerts
+            .iter()
+            .filter(|alert| now.saturating_sub(alert.timestamp) < ALERT_TTL_MILLIS)
+            .collect();
         let loops = &state.restart_loops;
         if alerts.is_empty() && exits.is_empty() && loops.is_empty() {
             frame.render_widget(Paragraph::new("no alerts").block(block), area);
             return;
         }
         let mut lines: Vec<Line> = alerts
-            .iter()
+            .into_iter()
             .rev()
             .take(2)
             .map(|alert| {
@@ -1045,7 +1054,7 @@ mod tests {
     fn the_alert_pane_lists_the_recent_alerts_with_their_severity() {
         let alert = crate::alert::Alert {
             id: 1,
-            timestamp: 0,
+            timestamp: crate::collect::now_millis(),
             severity: crate::core::Severity::Critical,
             category: crate::alert::AlertCategory::Cpu,
             message: "CPU has been busy".into(),
@@ -1064,6 +1073,34 @@ mod tests {
         assert!(text.contains("Alerts"), "{text}");
         assert!(text.contains("CRITICAL"), "{text}");
         assert!(text.contains("CPU has been busy"), "{text}");
+    }
+
+    #[test]
+    fn an_alert_leaves_the_pane_thirty_seconds_after_it_was_raised() {
+        let now = crate::collect::now_millis();
+        let alert = |id, timestamp, message: &str| crate::alert::Alert {
+            id,
+            timestamp,
+            severity: crate::core::Severity::Warning,
+            category: crate::alert::AlertCategory::Cpu,
+            message: message.into(),
+            metric: None,
+            pid: None,
+            process_name: None,
+            current_value: 0.0,
+            threshold: None,
+            baseline: None,
+            suggestion: String::new(),
+        };
+        let app = App::with_alerts(vec![
+            alert(1, now - ALERT_TTL_MILLIS - 1_000, "stale alert"),
+            alert(2, now, "fresh alert"),
+        ]);
+
+        let text = render(&app, 120, 40);
+
+        assert!(text.contains("fresh alert"), "{text}");
+        assert!(!text.contains("stale alert"), "{text}");
     }
 
     #[test]
